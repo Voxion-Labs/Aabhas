@@ -1,0 +1,13 @@
+[package]
+name = "aabhas-rust-trap"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "aabhas"
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2"
+sysinfo = { version = "0.30", default-features = false }
