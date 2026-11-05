@@ -1,2 +1,7 @@
-// [VOXION LABS] - Aabhas Control-Plane
-// Go orchestrator. ZERO tensor logic here.
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("aabhas-cli: use the REST control-plane API")
+}

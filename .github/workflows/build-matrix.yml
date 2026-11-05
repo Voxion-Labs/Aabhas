@@ -25,6 +25,9 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
       - name: Security Check - Audit Rust Dependencies
         run: cargo audit
         working-directory: core-engine/rust_trap
@@ -32,6 +35,10 @@ jobs:
 
       - name: Build Core Data-Plane (Rust/C++)
         run: cargo build --verbose
+        working-directory: core-engine/rust_trap
+
+      - name: Verify native library artifact
+        run: test -f target/debug/libaabhas.so
         working-directory: core-engine/rust_trap
 
       - name: Build Control-Plane (Go)
