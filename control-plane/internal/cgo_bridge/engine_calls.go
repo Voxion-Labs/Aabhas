@@ -3,7 +3,7 @@ package cgo_bridge
 
 /*
 #cgo linux CFLAGS: -I${SRCDIR}/../../../ffi-bridge
-#cgo linux LDFLAGS: -L${SRCDIR}/../../../core-engine/rust_trap/target/debug -Wl,-rpath,${SRCDIR}/../../../core-engine/rust_trap/target/debug -laabhas
+#cgo linux LDFLAGS: -L${SRCDIR}/../../../core-engine/rust_trap/target/release -L${SRCDIR}/../../../core-engine/rust_trap/target/debug -laabhas
 #include "rust_exports.h"
 #include <stdlib.h>
 */

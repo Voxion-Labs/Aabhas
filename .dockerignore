@@ -1,0 +1,9 @@
+.git
+.github
+dist
+bin
+**/target
+**/build
+**/__pycache__
+*.tar.gz
+*.sha256

@@ -1,0 +1,82 @@
+# syntax=docker/dockerfile:1.7
+
+# Aabhas Container Isolation release image.
+# The builder contains toolchains; the runtime contains only the daemon and
+# native shared library. EDR visibility is preserved through normal container
+# and host audit telemetry; this file does not bypass security controls.
+
+FROM golang:1.22-bookworm AS builder
+
+ARG RUST_TOOLCHAIN=1.85.1
+
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH=/root/.cargo/bin:/usr/local/go/bin:${PATH} \
+    CGO_ENABLED=1
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        pkg-config \
+        binutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --proto '=https' --tlsv1.2 --fail --silent --show-error https://sh.rustup.rs \
+        | sh -s -- -y --profile minimal --default-toolchain "${RUST_TOOLCHAIN}" \
+    && rustc --version \
+    && go version
+
+WORKDIR /workspace
+COPY core-engine ./core-engine
+COPY control-plane ./control-plane
+COPY ffi-bridge ./ffi-bridge
+COPY LICENSE ./LICENSE
+
+RUN cmake -S core-engine -B /tmp/aabhas-cmake -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_EXTENSIONS=OFF \
+    && cmake --build /tmp/aabhas-cmake --parallel \
+    && find /tmp/aabhas-cmake -type f -name '*.a' \
+        -exec strip --strip-unneeded {} +
+
+RUN cargo build --release --manifest-path core-engine/rust_trap/Cargo.toml
+
+RUN mkdir -p /out/lib /out/bin \
+    && cp core-engine/rust_trap/target/release/libaabhas.so /out/lib/libaabhas.so \
+    && strip --strip-unneeded /out/lib/libaabhas.so \
+    && cd control-plane \
+    && go build -trimpath -ldflags='-s -w -buildid=' \
+        -o /out/bin/aabhas-daemon ./cmd/aabhas-daemon \
+    && strip --strip-unneeded /out/bin/aabhas-daemon \
+    && chmod 0555 /out/bin/aabhas-daemon /out/lib/libaabhas.so
+
+FROM debian:bookworm-slim AS production
+
+LABEL org.opencontainers.image.title="Aabhas" \
+      org.opencontainers.image.description="Aabhas container-isolated inference control plane" \
+      org.opencontainers.image.source="https://github.com/Voxion-Labs/Aabhas"
+
+RUN groupadd --system --gid 65532 aabhas \
+    && useradd --system --uid 65532 --gid 65532 --home-dir /nonexistent \
+        --shell /usr/sbin/nologin aabhas \
+    && install -d -o 65532 -g 65532 -m 0750 /models /app /usr/local/lib \
+    && mkdir -p /usr/share/doc/aabhas
+
+COPY --from=builder /out/lib/libaabhas.so /usr/local/lib/libaabhas.so
+COPY --from=builder /out/bin/aabhas-daemon /usr/local/bin/aabhas-daemon
+COPY --from=builder /workspace/LICENSE /usr/share/doc/aabhas/LICENSE
+
+RUN ldconfig \
+    && chown root:root /usr/local/bin/aabhas-daemon /usr/local/lib/libaabhas.so \
+    && chmod 0555 /usr/local/bin/aabhas-daemon \
+    && chmod 0444 /usr/local/lib/libaabhas.so /usr/share/doc/aabhas/LICENSE
+
+ENV AABHAS_LISTEN_ADDR=0.0.0.0:8080 \
+    LD_LIBRARY_PATH=/usr/local/lib
+
+WORKDIR /app
+USER 65532:65532
+EXPOSE 8080
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/aabhas-daemon"]
