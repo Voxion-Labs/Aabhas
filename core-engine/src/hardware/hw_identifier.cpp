@@ -3,12 +3,20 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <utility>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <winreg.h>
+#else
 #include <fcntl.h>
 #include <limits>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#endif
 
 #if defined(__linux__)
 #include <sys/sysmacros.h>
@@ -17,6 +25,61 @@
 namespace aabhas::hardware {
 namespace {
 
+std::string trim_ascii(const char* value, std::size_t length) {
+    std::size_t begin = 0;
+    while (begin < length && (value[begin] == ' ' || value[begin] == '\t' ||
+                              value[begin] == '\r' || value[begin] == '\n')) {
+        ++begin;
+    }
+    std::size_t end = length;
+    while (end > begin && (value[end - 1] == ' ' || value[end - 1] == '\t' ||
+                           value[end - 1] == '\r' || value[end - 1] == '\n')) {
+        --end;
+    }
+    return std::string(value + begin, end - begin);
+}
+
+#if defined(_WIN32)
+std::string read_windows_machine_guid() {
+    HKEY key = nullptr;
+    const LONG opened = ::RegOpenKeyExA(
+        HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0,
+        KEY_READ | KEY_WOW64_64KEY, &key);
+    if (opened != ERROR_SUCCESS) return {};
+
+    char value[256]{};
+    DWORD value_size = static_cast<DWORD>(sizeof(value));
+    DWORD value_type = 0;
+    const LONG queried = ::RegQueryValueExA(
+        key, "MachineGuid", nullptr, &value_type,
+        reinterpret_cast<LPBYTE>(value), &value_size);
+    (void)::RegCloseKey(key);
+    if (queried != ERROR_SUCCESS ||
+        (value_type != REG_SZ && value_type != REG_EXPAND_SZ) || value_size == 0) {
+        return {};
+    }
+    const std::size_t length = value_size > 0 && value[value_size - 1] == '\0'
+        ? static_cast<std::size_t>(value_size - 1)
+        : static_cast<std::size_t>(value_size);
+    return trim_ascii(value, length);
+}
+#else
+std::string read_posix_identity_file(const char* path) {
+    int flags = O_RDONLY;
+#if defined(O_CLOEXEC)
+    flags |= O_CLOEXEC;
+#endif
+    const int fd = ::open(path, flags);
+    if (fd < 0) return {};
+    char value[256]{};
+    const ssize_t bytes = ::read(fd, value, sizeof(value) - 1);
+    (void)::close(fd);
+    if (bytes <= 0) return {};
+    return trim_ascii(value, static_cast<std::size_t>(bytes));
+}
+#endif
+
+#if !defined(_WIN32)
 std::uint64_t positive_sysconf(int name) noexcept {
     const long value = ::sysconf(name);
     return value > 0 ? static_cast<std::uint64_t>(value) : 0;
@@ -90,10 +153,26 @@ DriveType linux_device_type(const struct stat&, const char*) {
 }
 #endif
 
+#endif // !defined(_WIN32)
+
 } // namespace
 
 HostSpecifications HardwareIdentifier::host() const {
     HostSpecifications result;
+#if defined(_WIN32)
+    SYSTEM_INFO system_info{};
+    ::GetSystemInfo(&system_info);
+    result.system = "Windows";
+    result.logical_cpu_count = static_cast<std::uint64_t>(system_info.dwNumberOfProcessors);
+    result.page_size = static_cast<std::uint64_t>(system_info.dwPageSize);
+
+    MEMORYSTATUSEX memory_status{};
+    memory_status.dwLength = sizeof(memory_status);
+    if (::GlobalMemoryStatusEx(&memory_status) != FALSE) {
+        result.physical_memory_bytes = memory_status.ullTotalPhys;
+        result.available_memory_bytes = memory_status.ullAvailPhys;
+    }
+#else
     struct utsname system_info {};
     if (::uname(&system_info) == 0) {
         result.system = system_info.sysname;
@@ -116,6 +195,7 @@ HostSpecifications HardwareIdentifier::host() const {
     result.available_memory_bytes = multiply_saturated(
         positive_sysconf(_SC_AVPHYS_PAGES), result.page_size);
 #endif
+#endif
     return result;
 }
 
@@ -126,6 +206,19 @@ DriveSpecifications HardwareIdentifier::drive(const char* path) const {
         return result;
     }
     result.path = path;
+#if defined(_WIN32)
+    const DWORD attributes = ::GetFileAttributesA(path);
+    if (attributes == INVALID_FILE_ATTRIBUTES) return result;
+    result.regular_file = (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    ULARGE_INTEGER free_bytes{};
+    ULARGE_INTEGER total_bytes{};
+    ULARGE_INTEGER total_free_bytes{};
+    if (::GetDiskFreeSpaceExA(path, &free_bytes, &total_bytes, &total_free_bytes) != FALSE) {
+        result.capacity_bytes = total_bytes.QuadPart;
+        result.available_bytes = free_bytes.QuadPart;
+    }
+    return result;
+#else
     struct stat metadata {};
     if (::stat(path, &metadata) != 0) return result;
     result.regular_file = S_ISREG(metadata.st_mode);
@@ -142,6 +235,23 @@ DriveSpecifications HardwareIdentifier::drive(const char* path) const {
             static_cast<std::uint64_t>(filesystem_info.f_bavail), block_size);
     }
     return result;
+#endif
+}
+
+std::string HardwareIdentifier::system_uuid() const {
+#if defined(_WIN32)
+    // MachineGuid is the stable native Windows host identity available without
+    // introducing a COM/WMI runtime dependency. It is used only as a fallback
+    // host binding when a firmware UUID API is not exposed to this process.
+    return read_windows_machine_guid();
+#else
+    std::string uuid = read_posix_identity_file("/sys/class/dmi/id/product_uuid");
+    if (!uuid.empty()) return uuid;
+    uuid = read_posix_identity_file("/sys/devices/virtual/dmi/id/product_uuid");
+    if (!uuid.empty()) return uuid;
+    // machine-id is a stable host identity fallback for non-DMI environments.
+    return read_posix_identity_file("/etc/machine-id");
+#endif
 }
 
 const char* HardwareIdentifier::drive_type_name(DriveType type) noexcept {

@@ -1,3 +1,44 @@
-VOXION LABS MASTER PROPRIETARY LICENSE (VL-MPL)
+================================================================
+          VOXION LABS MASTER PROPRIETARY LICENSE (VL-MPL)
+                        Version 2.0, October 2026
+================================================================
 
-// Unauthorized derivation triggers the poison pill.
+Copyright (c) 2026 Voxion Labs & Rudranarayan Jena. All rights reserved.
+
+1. PREAMBLE & JURISDICTION
+----------------------------------------------------------------
+This Master License governs the overarching software, architectures, AI kernels, and UI/UX ecosystems deployed across all repositories managed by Voxion Labs. The underlying codebases are the exclusive, proprietary intellectual property of Voxion Labs. Transparency of source code is provided strictly for academic peer-review, deterministic security auditing, and localized architectural study. Transparency does not equate to open-source permissibility.
+
+2. GRANT OF RESTRICTED ACCESS
+----------------------------------------------------------------
+You are granted a conditional, non-exclusive, non-transferable, and highly revocable permission to:
+a) Clone and compile the source code exclusively for personal, localized, and offline execution.
+b) Review and mathematically analyze the architectures, CRDT implementations, and WebAssembly kernels for academic research.
+c) Submit proposed architectural optimizations via Pull Requests, subject entirely to the strict governance protocols defined by Voxion Labs.
+
+3. ABSOLUTE RESTRICTIONS
+----------------------------------------------------------------
+Under no circumstances, without explicit, written, cryptographically verified consent from the Founder of Voxion Labs, are you permitted to:
+a) Exploit this software, its design patterns, or its underlying kernels for commercial, enterprise, or profit-generating operations.
+b) Deploy, mirror, or host this software as a public Service (SaaS), API endpoint, or backend infrastructure.
+c) Redistribute, sub-license, repackage, or claim intellectual ownership of any derivative works.
+d) Strip, obscure, or alter this Master License notice from any module, header, or associated documentation.
+
+4. ECOSYSTEM CONTRIBUTIONS & INTELLECTUAL PROPERTY
+----------------------------------------------------------------
+By submitting any code, patches, architectural modifications, or telemetry data to this repository or any affiliated Voxion Labs repository, you automatically, irrevocably, and perpetually transfer all copyrights and intellectual property rights of that submission to Voxion Labs.
+
+4.1. VIRAL CONTAMINATION & ROGUE DERIVATIVE NEUTRALIZATION (THE POISON PILL)
+Any unauthorized forking, commercial integration, or deployment of this Software (a "Rogue Derivative") in violation of Section 3 immediately and permanently terminates all your rights under this License. Furthermore, unauthorized commercial usage constitutes severe copyright infringement. By creating a Rogue Derivative, you legally concede to immediate injunctive relief, granting Voxion Labs the unreserved right to legally dismantle, block, and shut down your derivative product worldwide. You shall be held strictly liable for maximum statutory damages, punitive damages, and all associated legal costs incurred by Voxion Labs to neutralize the unauthorized usage.
+
+5. ECOSYSTEM AUDIT & ENFORCEMENT
+----------------------------------------------------------------
+Voxion Labs reserves the unmitigated right to enforce strict intellectual property protection across its digital ecosystem. Unauthorized commercial exploitation, public hosting, or codebase cloning constitutes a critical violation. Voxion Labs may actively monitor and audit public deployments to ensure compliance, and any breach will trigger immediate legal action and compensatory damage claims.
+
+6. DISCLAIMER OF ALL WARRANTIES
+----------------------------------------------------------------
+THE SOFTWARE, KERNELS, AND ARCHITECTURES ARE PROVIDED BY VOXION LABS STRICTLY "AS IS". ALL EXPRESS OR IMPLIED WARRANTIES, INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF MERCHANTABILITY, SECURITY FATALITY, AND FITNESS FOR A PARTICULAR PURPOSE, ARE ABSOLUTELY DISCLAIMED. IN NO EVENT SHALL VOXION LABS OR ITS FOUNDERS BE HELD LIABLE FOR ANY DAMAGES ARISING FROM THE USAGE OF THIS SOFTWARE.
+
+================================================================
+                    END OF TERMS AND CONDITIONS
+================================================================

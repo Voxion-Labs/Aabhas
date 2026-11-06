@@ -31,6 +31,8 @@ class HardwareIdentifier final {
 public:
     HostSpecifications host() const;
     DriveSpecifications drive(const char* path) const;
+    /** Return a stable host UUID, or an empty string when unavailable. */
+    std::string system_uuid() const;
     static const char* drive_type_name(DriveType type) noexcept;
 };
 
