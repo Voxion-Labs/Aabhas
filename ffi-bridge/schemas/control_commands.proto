@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package aabhas.control.v1;
+
+option go_package = "github.com/Voxion-Labs/Aabhas/ffi-bridge/gen/control;control";
+
+message StartRequest {
+  string model_path = 1;
+}
+
+message StatusResponse {
+  bool success = 1;
+  string message = 2;
+}

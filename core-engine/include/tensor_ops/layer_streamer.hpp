@@ -1,7 +1,7 @@
 #ifndef AABHAS_TENSOR_OPS_LAYER_STREAMER_HPP
 #define AABHAS_TENSOR_OPS_LAYER_STREAMER_HPP
 
-#include "hardware/nvme_streamer.hpp"
+#include "hardware/nvme_direct.hpp"
 #include "memory/mmap_illusion.hpp"
 
 #include <cstddef>
@@ -26,6 +26,7 @@ struct LayerView {
 class LayerStreamer final {
 public:
     static constexpr std::size_t default_memory_cap = 512ULL * 1024ULL * 1024ULL;
+    static constexpr std::size_t default_chunk_size = 64ULL * 1024ULL * 1024ULL;
 
     LayerStreamer() noexcept = default;
     ~LayerStreamer() noexcept;
@@ -36,6 +37,9 @@ public:
               std::size_t memory_cap_bytes = default_memory_cap);
     void close() noexcept;
     bool fetch(std::size_t layer_index) noexcept;
+    bool fetch_chunk(std::size_t layer_index, std::uint64_t chunk_offset,
+                     std::size_t chunk_bytes) noexcept;
+    bool fetch_next_chunk(std::size_t chunk_bytes = default_chunk_size) noexcept;
     bool fetch_next() noexcept;
     void drop() noexcept;
 
@@ -49,11 +53,12 @@ public:
 
 private:
     static constexpr std::size_t no_layer = static_cast<std::size_t>(-1);
-    aabhas::hardware::NvmeStreamer source_;
+    aabhas::hardware::NvmeDirectReader source_;
     aabhas::memory::MemoryIllusionist mapping_;
     std::vector<LayerDescriptor> layers_;
     std::size_t current_index_{no_layer};
     std::size_t memory_cap_bytes_{default_memory_cap};
+    std::uint64_t current_chunk_offset_{0};
 };
 
 } // namespace aabhas::tensor_ops

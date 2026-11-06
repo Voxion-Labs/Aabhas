@@ -37,3 +37,30 @@ jobs:
           --target "${{ github.event.workflow_run.head_sha }}"
           --title "Aabhas ${RELEASE_TAG}"
           --notes "Automated release generated after successful Aabhas Core Matrix CI."
+
+      - name: Publish bot-authored release manifest commit
+        env:
+          RELEASE_TAG: build-${{ github.event.workflow_run.run_number }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+        run: |
+          set -Eeuo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin refs/heads/main:refs/remotes/origin/main
+          git switch --create main --track origin/main
+
+          mkdir -p bot-release
+          cat > bot-release/release-manifest.json <<EOF
+          {
+            "release_tag": "${RELEASE_TAG}",
+            "tested_commit": "${TESTED_SHA}",
+            "ci_run": ${RUN_NUMBER},
+            "generated_by": "github-actions[bot]"
+          }
+          EOF
+
+          git add bot-release/release-manifest.json
+          git commit -m "ci: publish release manifest [skip ci]"
+          git push origin HEAD:refs/heads/main

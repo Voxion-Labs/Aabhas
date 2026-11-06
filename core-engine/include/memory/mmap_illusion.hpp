@@ -26,6 +26,8 @@ public:
 
     void* data() noexcept { return view_; }
     const void* data() const noexcept { return view_; }
+    void* mapped_base() noexcept { return mapping_base_; }
+    const void* mapped_base() const noexcept { return mapping_base_; }
     std::size_t size() const noexcept { return view_size_; }
     std::size_t mapped_size() const noexcept { return mapping_size_; }
     bool mapped() const noexcept { return view_ != nullptr; }

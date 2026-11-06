@@ -3,7 +3,9 @@ cmake_minimum_required(VERSION 3.16)
 project(aabhas_data_plane LANGUAGES CXX)
 
 add_library(aabhas_data_plane STATIC
+    src/memory/madvise_utils.cpp
     src/memory/mmap_illusion.cpp
+    src/hardware/nvme_direct.cpp
     src/hardware/nvme_streamer.cpp
     src/hardware/hw_identifier.cpp
     src/tensor_ops/layer_streamer.cpp
