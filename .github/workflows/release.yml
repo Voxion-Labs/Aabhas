@@ -8,8 +8,11 @@ on:
 # This is the only workflow with contents: write. Build and audit workflows
 # remain read-only. It publishes an immutable bot-authored release after the
 # owner-approved CI workflow succeeds on main.
-permissions:
-  contents: write
+permissions: {}
+
+concurrency:
+  group: aabhas-release-main
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -17,26 +20,13 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout tested commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Build stripped release archive
-        run: bash scripts/build_release.sh
-        env:
-          AABHAS_RELEASE_VERSION: build-${{ github.event.workflow_run.run_number }}
-
-      - name: Publish bot-authored release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: build-${{ github.event.workflow_run.run_number }}
-        run: >-
-          gh release create "${RELEASE_TAG}" dist/*.tar.gz dist/*.sha256
-          --target "${{ github.event.workflow_run.head_sha }}"
-          --title "Aabhas ${RELEASE_TAG}"
-          --notes "Automated release generated after successful Aabhas Core Matrix CI."
 
       - name: Publish bot-authored release manifest commit
         env:
@@ -64,3 +54,18 @@ jobs:
           git add bot-release/release-manifest.json
           git commit -m "ci: publish release manifest [skip ci]"
           git push origin HEAD:refs/heads/main
+
+      - name: Build stripped release archive
+        run: bash scripts/build_release.sh
+        env:
+          AABHAS_RELEASE_VERSION: build-${{ github.event.workflow_run.run_number }}
+
+      - name: Publish bot-authored release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: build-${{ github.event.workflow_run.run_number }}
+        run: >-
+          gh release create "${RELEASE_TAG}" dist/*.tar.gz dist/*.sha256
+          --target "${{ github.event.workflow_run.head_sha }}"
+          --title "Aabhas ${RELEASE_TAG}"
+          --notes "Automated release generated after successful Aabhas Core Matrix CI."

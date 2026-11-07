@@ -23,6 +23,14 @@ must enable a GitHub branch ruleset for `main` in Settings → Rules → Ruleset
    generated manifest operation.
 4. Keep repository Actions permissions on read-only by default; retain the
    release job’s narrowly scoped `contents: write` permission.
+5. Disable repository forking in Settings → General if copies outside the
+   repository owner’s control are not permitted. A repository file cannot
+   prevent a GitHub account from forking or cloning.
+
+Pull requests from other users or forks may still be visible when GitHub
+allows them, but `CODEOWNERS` and the required branch ruleset must prevent
+merge or direct writes without owner approval. The release workflow’s token is
+the only automated write identity used by this repository.
 
 GitHub repository settings are account-level controls and cannot be reliably
 enforced by a file committed inside the repository.

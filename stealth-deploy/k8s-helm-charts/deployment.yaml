@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aabhas-daemon
+  labels:
+    app.kubernetes.io/name: aabhas
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aabhas
+      app.kubernetes.io/component: control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aabhas
+        app.kubernetes.io/component: control-plane
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: aabhas-daemon
+          image: ghcr.io/voxion-labs/aabhas:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: AABHAS_LISTEN_ADDR
+              value: 0.0.0.0:8080
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["IPC_LOCK"]
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            - name: model-ssd
+              mountPath: /models
+              readOnly: true
+            - name: tensor-ssd
+              mountPath: /mnt/aabhas-tensors
+              readOnly: true
+      volumes:
+        - name: model-ssd
+          hostPath:
+            path: /var/lib/aabhas/models
+            type: Directory
+        - name: tensor-ssd
+          hostPath:
+            path: /var/lib/aabhas/tensors
+            type: Directory
