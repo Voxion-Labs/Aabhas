@@ -40,6 +40,12 @@ also rejects a second active model.
 
 ## C++ NVMe data plane
 
+The C++ data plane is currently built as the `aabhas_data_plane` static
+library. The Phase 1 build contract makes that artifact mandatory in local,
+CI, and container builds; a successful Rust or Go build must not be treated as
+proof that the C++ layer was compiled. The runtime wiring from this library
+into the Rust safety boundary and the model execution path is a later phase.
+
 `NvmeDirectReader` owns a raw POSIX file descriptor. On Linux it attempts
 `O_DIRECT` and falls back to buffered `O_RDONLY` when the filesystem does not
 support direct I/O. The fallback is explicit and observable through reader

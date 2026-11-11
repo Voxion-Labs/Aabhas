@@ -1,6 +1,8 @@
 
 .PHONY: all setup build-core build-go clean nuke safe-test sync push dev
 
+CORE_BUILD_DIR ?= core-engine/build
+
 all: build-core build-go
 
 # --- DEV TOOLS ---
@@ -17,8 +19,12 @@ dev:
 # --- BUILD COMMANDS ---
 build-core:
 	@echo "Compiling the Data-Plane (C++ & Rust)..."
+	@cmake -S core-engine -B $(CORE_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_EXTENSIONS=OFF
+	@cmake --build $(CORE_BUILD_DIR) --parallel
+	@test -f $(CORE_BUILD_DIR)/libaabhas_data_plane.a
 	@cd core-engine/rust_trap && cargo build --release
-	@echo "✅ libaabhas.so built successfully."
+	@test -f core-engine/rust_trap/target/release/libaabhas.so
+	@echo "✅ C++ data-plane and Rust safety library built successfully."
 
 build-go:
 	@echo "Compiling the Control-Plane (Go)..."

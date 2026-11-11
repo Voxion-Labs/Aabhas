@@ -37,6 +37,7 @@ COPY LICENSE ./LICENSE
 RUN cmake -S core-engine -B /tmp/aabhas-cmake -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_EXTENSIONS=OFF \
     && cmake --build /tmp/aabhas-cmake --parallel \
+    && test -f /tmp/aabhas-cmake/libaabhas_data_plane.a \
     && find /tmp/aabhas-cmake -type f -name '*.a' \
         -exec strip --strip-unneeded {} +
 
