@@ -66,4 +66,23 @@ if [[ "${stop_code}" != "200" ]]; then
 	exit 1
 fi
 
+restart_code="$(curl --silent --show-error --output "${WORK_DIR}/restart.response" --write-out '%{http_code}' \
+	-H 'Content-Type: application/json' -X POST \
+	-d "{\"model_path\":\"${MODEL_PATH}\"}" \
+	"${BASE_URL}/api/v1/engine/start")"
+if [[ "${restart_code}" != "200" ]]; then
+	echo "run_tests: expected restart HTTP 200, got ${restart_code}" >&2
+	cat "${WORK_DIR}/restart.response" >&2
+	cat "${LOG_PATH}" >&2
+	exit 1
+fi
+
+restart_stop_code="$(curl --silent --show-error --output "${WORK_DIR}/restart-stop.response" --write-out '%{http_code}' \
+	-X POST "${BASE_URL}/api/v1/engine/stop")"
+if [[ "${restart_stop_code}" != "200" ]]; then
+	echo "run_tests: expected restart stop HTTP 200, got ${restart_stop_code}" >&2
+	cat "${WORK_DIR}/restart-stop.response" >&2
+	exit 1
+fi
+
 echo "Aabhas REST end-to-end test passed"

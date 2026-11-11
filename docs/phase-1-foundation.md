@@ -12,9 +12,9 @@ buildable before adding model execution behavior.
 3. The production image build fails if the C++ static library is not produced.
 4. The expected C++ artifact is checked explicitly as
    `libaabhas_data_plane.a`.
-5. The architecture documentation records that C++ runtime wiring is not yet
-   complete, so a green Rust/Go build cannot be mistaken for end-to-end
-   inference readiness.
+5. The architecture documentation records the build boundary and the limited
+   Phase 2 lifecycle integration, so a green Rust/Go build cannot be mistaken
+   for end-to-end inference readiness.
 
 ## Acceptance criteria
 

@@ -43,8 +43,10 @@ also rejects a second active model.
 The C++ data plane is currently built as the `aabhas_data_plane` static
 library. The Phase 1 build contract makes that artifact mandatory in local,
 CI, and container builds; a successful Rust or Go build must not be treated as
-proof that the C++ layer was compiled. The runtime wiring from this library
-into the Rust safety boundary and the model execution path is a later phase.
+proof that the C++ layer was compiled. The Phase 2 Rust safety boundary now
+invokes the C++ lifecycle boundary after RAM and storage admission checks.
+Phase 2 starts one bounded file-backed layer window and releases it during
+stop; model-format parsing and tensor execution remain later phases.
 
 `NvmeDirectReader` owns a raw POSIX file descriptor. On Linux it attempts
 `O_DIRECT` and falls back to buffered `O_RDONLY` when the filesystem does not

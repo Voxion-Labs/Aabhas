@@ -8,6 +8,7 @@ add_library(aabhas_data_plane STATIC
     src/hardware/nvme_direct.cpp
     src/hardware/nvme_streamer.cpp
     src/hardware/hw_identifier.cpp
+    src/engine/native_engine.cpp
     src/tensor_ops/layer_streamer.cpp
 )
 

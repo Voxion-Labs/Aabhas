@@ -5,6 +5,11 @@ use std::ffi::{c_char, CStr};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Mutex, OnceLock};
 
+unsafe extern "C" {
+    fn aabhas_native_start(model_path: *const c_char) -> i32;
+    fn aabhas_native_stop() -> i32;
+}
+
 /// Start completed successfully.
 pub const STATUS_OK: i32 = 0;
 /// The model path pointer was null or the path was empty.
@@ -59,6 +64,11 @@ fn start_inner(model_path: *const c_char) -> i32 {
         Err(_) => return STATUS_HEALTH_CHECK,
     }
 
+    let native_status = unsafe { aabhas_native_start(model_path) };
+    if native_status != STATUS_OK {
+        return STATUS_HEALTH_CHECK;
+    }
+
     *guard = Some(EngineState);
     STATUS_OK
 }
@@ -68,10 +78,15 @@ fn stop_inner() -> i32 {
         Ok(value) => value,
         Err(_) => return STATUS_HEALTH_CHECK,
     };
-    if guard.take().is_some() {
-        STATUS_OK
-    } else {
+    if guard.is_none() {
         STATUS_NOT_STARTED
+    } else {
+        let native_status = unsafe { aabhas_native_stop() };
+        if native_status != STATUS_OK && native_status != STATUS_NOT_STARTED {
+            return STATUS_HEALTH_CHECK;
+        }
+        guard.take();
+        STATUS_OK
     }
 }
 

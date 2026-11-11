@@ -41,7 +41,8 @@ RUN cmake -S core-engine -B /tmp/aabhas-cmake -DCMAKE_BUILD_TYPE=Release \
     && find /tmp/aabhas-cmake -type f -name '*.a' \
         -exec strip --strip-unneeded {} +
 
-RUN cargo build --release --manifest-path core-engine/rust_trap/Cargo.toml
+RUN AABHAS_CPP_LIB_DIR=/tmp/aabhas-cmake \
+    cargo build --release --manifest-path core-engine/rust_trap/Cargo.toml
 
 RUN mkdir -p /out/lib /out/bin \
     && cp core-engine/rust_trap/target/release/libaabhas.so /out/lib/libaabhas.so \
