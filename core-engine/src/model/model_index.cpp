@@ -134,6 +134,16 @@ bool skip_gguf_value(BinaryReader& reader, std::uint32_t type,
     }
 }
 
+TensorDType gguf_dtype(std::uint32_t type) {
+    switch (type) {
+    case 0: return TensorDType::F32;
+    case 1: return TensorDType::F16;
+    case 2: return TensorDType::Q4_0;
+    case 8: return TensorDType::Q8_0;
+    default: return TensorDType::Unknown;
+    }
+}
+
 IndexResult inspect_gguf(std::ifstream& stream, std::uint64_t file_size) {
     BinaryReader reader(stream);
     char magic[4]{};
@@ -177,6 +187,8 @@ IndexResult inspect_gguf(std::ifstream& stream, std::uint64_t file_size) {
     struct PendingTensor {
         std::string name;
         std::uint64_t offset{0};
+        std::uint32_t type{0};
+        std::vector<std::uint64_t> shape;
     };
     std::vector<PendingTensor> pending;
     pending.reserve(static_cast<std::size_t>(tensor_count));
@@ -188,13 +200,17 @@ IndexResult inspect_gguf(std::ifstream& stream, std::uint64_t file_size) {
             dimensions > 32) {
             return {{}, IndexError::Malformed};
         }
+        tensor.shape.reserve(dimensions);
         for (std::uint32_t dimension = 0; dimension < dimensions; ++dimension) {
-            if (!reader.skip(8)) return {{}, IndexError::Malformed};
+            std::uint64_t extent = 0;
+            if (!reader.read_u64(extent) || extent == 0) return {{}, IndexError::Malformed};
+            tensor.shape.push_back(extent);
         }
         if (!reader.read_u32(tensor_type) || tensor_type > 100 ||
             !reader.read_u64(tensor.offset)) {
             return {{}, IndexError::Malformed};
         }
+        tensor.type = tensor_type;
         pending.push_back(std::move(tensor));
     }
 
@@ -223,7 +239,9 @@ IndexResult inspect_gguf(std::ifstream& stream, std::uint64_t file_size) {
         if (end <= relative_offset || end > file_size - data_start) {
             return {{}, IndexError::Malformed};
         }
-        index.tensors.push_back({pending[item].name, absolute_offset, end - relative_offset});
+        index.tensors.push_back({pending[item].name, absolute_offset,
+                                 end - relative_offset, gguf_dtype(pending[item].type),
+                                 std::move(pending[item].shape)});
     }
     return {std::move(index), IndexError::None};
 }
@@ -348,6 +366,20 @@ public:
         return end >= begin;
     }
 
+    bool unsigned_array(std::vector<std::uint64_t>& values) {
+        if (!consume('[')) return false;
+        values.clear();
+        whitespace();
+        if (consume(']')) return true;
+        for (;;) {
+            std::uint64_t value = 0;
+            if (!unsigned_number(value) || value == 0) return false;
+            values.push_back(value);
+            if (consume(']')) return true;
+            if (!consume(',')) return false;
+        }
+    }
+
     bool at_end() noexcept {
         whitespace();
         return position_ == source_.size();
@@ -358,6 +390,15 @@ private:
     std::size_t position_{0};
 };
 
+TensorDType safetensors_dtype(const std::string& value) {
+    if (value == "F32") return TensorDType::F32;
+    if (value == "F16") return TensorDType::F16;
+    if (value == "BF16") return TensorDType::BF16;
+    if (value == "I8") return TensorDType::I8;
+    if (value == "U8") return TensorDType::U8;
+    return TensorDType::Unknown;
+}
+
 bool parse_safetensors_tensor(JsonReader& reader, const std::string& name,
                               std::uint64_t data_base, std::uint64_t file_size,
                               TensorDescriptor& descriptor) {
@@ -365,6 +406,10 @@ bool parse_safetensors_tensor(JsonReader& reader, const std::string& name,
     std::uint64_t begin = 0;
     std::uint64_t end = 0;
     bool found_offsets = false;
+    bool found_dtype = false;
+    bool found_shape = false;
+    std::string dtype;
+    std::vector<std::uint64_t> shape;
     reader.whitespace();
     if (!reader.consume('}')) {
         for (;;) {
@@ -373,6 +418,12 @@ bool parse_safetensors_tensor(JsonReader& reader, const std::string& name,
             if (key == "data_offsets") {
                 if (!reader.data_offsets(begin, end)) return false;
                 found_offsets = true;
+            } else if (key == "dtype") {
+                if (!reader.string(dtype)) return false;
+                found_dtype = true;
+            } else if (key == "shape") {
+                if (!reader.unsigned_array(shape)) return false;
+                found_shape = true;
             } else if (!reader.skip_value()) {
                 return false;
             }
@@ -382,12 +433,14 @@ bool parse_safetensors_tensor(JsonReader& reader, const std::string& name,
     }
     std::uint64_t absolute_begin = 0;
     std::uint64_t absolute_end = 0;
-    if (!found_offsets || add_overflow(data_base, begin, absolute_begin) ||
+    if (!found_offsets || !found_dtype || !found_shape || shape.empty() ||
+        add_overflow(data_base, begin, absolute_begin) ||
         add_overflow(data_base, end, absolute_end) || absolute_end > file_size ||
         absolute_begin >= absolute_end) {
         return false;
     }
-    descriptor = {name, absolute_begin, absolute_end - absolute_begin};
+    descriptor = {name, absolute_begin, absolute_end - absolute_begin,
+                  safetensors_dtype(dtype), std::move(shape)};
     return true;
 }
 

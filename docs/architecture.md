@@ -51,7 +51,9 @@ recognized tensor ranges become individual streamer layers; tensor decoding
 and execution remain later phases. Phase 4 wraps the streamer in a serialized
 layer scheduler: one resident window is active at a time, explicit release is
 required before advancement, and bounded `POSIX_FADV_WILLNEED` hints provide
-read-ahead without a second user-space tensor buffer.
+read-ahead without a second user-space tensor buffer. Phase 5 adds typed tensor
+metadata, a streamed F32 matrix-vector kernel, and a bounded KV-cache as the
+first compute-facing runtime boundary.
 
 `NvmeDirectReader` owns a raw POSIX file descriptor. On Linux it attempts
 `O_DIRECT` and falls back to buffered `O_RDONLY` when the filesystem does not

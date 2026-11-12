@@ -49,6 +49,8 @@ void test_safetensors(const std::filesystem::path& path) {
     assert(result.index.tensors[0].name == "tensor");
     assert(result.index.tensors[0].file_offset == 8 + header.size());
     assert(result.index.tensors[0].byte_size == 4);
+    assert(result.index.tensors[0].dtype == aabhas::model::TensorDType::F32);
+    assert(result.index.tensors[0].shape == std::vector<std::uint64_t>{1});
 }
 
 void test_gguf(const std::filesystem::path& path) {
@@ -77,6 +79,8 @@ void test_gguf(const std::filesystem::path& path) {
     assert(result.index.tensors[0].name == "tensor");
     assert(result.index.tensors[0].file_offset == data_offset);
     assert(result.index.tensors[0].byte_size == 4);
+    assert(result.index.tensors[0].dtype == aabhas::model::TensorDType::F32);
+    assert(result.index.tensors[0].shape == std::vector<std::uint64_t>{1});
 }
 
 } // namespace

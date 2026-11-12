@@ -13,6 +13,17 @@ enum class ModelFormat : std::uint8_t {
     SafeTensors,
 };
 
+enum class TensorDType : std::uint8_t {
+    Unknown,
+    F32,
+    F16,
+    BF16,
+    I8,
+    U8,
+    Q4_0,
+    Q8_0,
+};
+
 enum class IndexError : std::uint8_t {
     None,
     InvalidArgument,
@@ -24,6 +35,8 @@ struct TensorDescriptor {
     std::string name;
     std::uint64_t file_offset{0};
     std::uint64_t byte_size{0};
+    TensorDType dtype{TensorDType::Unknown};
+    std::vector<std::uint64_t> shape;
 };
 
 struct ModelIndex {

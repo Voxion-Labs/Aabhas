@@ -44,7 +44,9 @@ bool LayerScheduler::next_layer() noexcept {
         errno = ENOENT;
         return false;
     }
-    if (!streamer_.fetch(next_layer_index_)) return false;
+    const std::size_t first_bytes = std::min(
+        layers_[next_layer_index_].byte_size, config_.chunk_bytes);
+    if (!streamer_.fetch_chunk(next_layer_index_, 0, first_bytes)) return false;
     current_active_ = true;
     ++stats_.layers_started;
     ++next_layer_index_;
