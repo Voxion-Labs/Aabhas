@@ -2,9 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 
 project(aabhas_data_plane LANGUAGES CXX)
 
+option(AABHAS_BUILD_TESTS "Build native model-index tests" OFF)
+
 add_library(aabhas_data_plane STATIC
     src/memory/madvise_utils.cpp
     src/memory/mmap_illusion.cpp
+    src/model/model_index.cpp
     src/hardware/nvme_direct.cpp
     src/hardware/nvme_streamer.cpp
     src/hardware/hw_identifier.cpp
@@ -26,4 +29,16 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(aabhas_data_plane PRIVATE
         -Wall -Wextra -Wpedantic -Wconversion -Wshadow
     )
+endif()
+
+if (AABHAS_BUILD_TESTS)
+    include(CTest)
+    find_package(Threads REQUIRED)
+    add_executable(aabhas_model_index_test tests/model_index_test.cpp)
+    target_compile_features(aabhas_model_index_test PRIVATE cxx_std_17)
+    target_link_libraries(aabhas_model_index_test PRIVATE
+        aabhas_data_plane
+        Threads::Threads
+    )
+    add_test(NAME aabhas_model_index_test COMMAND aabhas_model_index_test)
 endif()

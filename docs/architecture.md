@@ -46,7 +46,9 @@ CI, and container builds; a successful Rust or Go build must not be treated as
 proof that the C++ layer was compiled. The Phase 2 Rust safety boundary now
 invokes the C++ lifecycle boundary after RAM and storage admission checks.
 Phase 2 starts one bounded file-backed layer window and releases it during
-stop; model-format parsing and tensor execution remain later phases.
+stop. Phase 3 adds bounded GGUF and SafeTensors metadata inspection so
+recognized tensor ranges become individual streamer layers; tensor decoding
+and execution remain later phases.
 
 `NvmeDirectReader` owns a raw POSIX file descriptor. On Linux it attempts
 `O_DIRECT` and falls back to buffered `O_RDONLY` when the filesystem does not

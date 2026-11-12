@@ -2,6 +2,7 @@
 .PHONY: all setup build-core build-go clean nuke safe-test sync push dev
 
 CORE_BUILD_DIR ?= core-engine/build
+AABHAS_BUILD_TESTS ?= OFF
 
 all: build-core build-go
 
@@ -19,7 +20,7 @@ dev:
 # --- BUILD COMMANDS ---
 build-core:
 	@echo "Compiling the Data-Plane (C++ & Rust)..."
-	@cmake -S core-engine -B $(CORE_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_EXTENSIONS=OFF
+	@cmake -S core-engine -B $(CORE_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_EXTENSIONS=OFF -DAABHAS_BUILD_TESTS=$(AABHAS_BUILD_TESTS)
 	@cmake --build $(CORE_BUILD_DIR) --parallel
 	@test -f $(CORE_BUILD_DIR)/libaabhas_data_plane.a
 	@cd core-engine/rust_trap && cargo build --release

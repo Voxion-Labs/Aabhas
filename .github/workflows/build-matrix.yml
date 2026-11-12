@@ -22,9 +22,10 @@ jobs:
 
       - name: Build C++ data plane
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_EXTENSIONS=OFF
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_EXTENSIONS=OFF -DAABHAS_BUILD_TESTS=ON
           cmake --build build --parallel
           test -f build/libaabhas_data_plane.a
+          ctest --test-dir build --output-on-failure
         working-directory: core-engine
 
       - name: Setup Go Environment
