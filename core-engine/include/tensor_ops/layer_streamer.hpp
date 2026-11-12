@@ -41,6 +41,8 @@ public:
                      std::size_t chunk_bytes) noexcept;
     bool fetch_next_chunk(std::size_t chunk_bytes = default_chunk_size) noexcept;
     bool fetch_next() noexcept;
+    /** Issue a bounded kernel read-ahead hint for a future layer. */
+    bool prefetch(std::size_t layer_index) const noexcept;
     void drop() noexcept;
 
     /** The returned view remains valid until the next fetch(), drop(), or close(). */

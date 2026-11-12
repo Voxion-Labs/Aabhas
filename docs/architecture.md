@@ -48,7 +48,10 @@ invokes the C++ lifecycle boundary after RAM and storage admission checks.
 Phase 2 starts one bounded file-backed layer window and releases it during
 stop. Phase 3 adds bounded GGUF and SafeTensors metadata inspection so
 recognized tensor ranges become individual streamer layers; tensor decoding
-and execution remain later phases.
+and execution remain later phases. Phase 4 wraps the streamer in a serialized
+layer scheduler: one resident window is active at a time, explicit release is
+required before advancement, and bounded `POSIX_FADV_WILLNEED` hints provide
+read-ahead without a second user-space tensor buffer.
 
 `NvmeDirectReader` owns a raw POSIX file descriptor. On Linux it attempts
 `O_DIRECT` and falls back to buffered `O_RDONLY` when the filesystem does not

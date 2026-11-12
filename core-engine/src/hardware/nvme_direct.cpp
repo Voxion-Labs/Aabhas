@@ -127,6 +127,25 @@ ssize_t NvmeDirectReader::read_at(void* destination, std::size_t bytes,
     }
 }
 
+bool NvmeDirectReader::prefetch(std::uint64_t offset, std::size_t bytes) const noexcept {
+    if (fd_ < 0 || offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        errno = EINVAL;
+        return false;
+    }
+    if (bytes == 0) return true;
+    const std::uint64_t max_off = static_cast<std::uint64_t>(std::numeric_limits<off_t>::max());
+    const std::uint64_t requested = static_cast<std::uint64_t>(bytes);
+    const std::uint64_t available = max_off - offset;
+    const off_t length = static_cast<off_t>(requested > available ? available : requested);
+#if defined(POSIX_FADV_WILLNEED)
+    return ::posix_fadvise(fd_, static_cast<off_t>(offset), length, POSIX_FADV_WILLNEED) == 0;
+#else
+    (void)length;
+    errno = ENOTSUP;
+    return false;
+#endif
+}
+
 bool NvmeDirectReader::seek(std::uint64_t offset) noexcept {
     if (fd_ < 0) {
         errno = EBADF;

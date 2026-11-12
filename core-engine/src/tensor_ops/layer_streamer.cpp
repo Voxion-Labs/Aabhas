@@ -109,6 +109,21 @@ bool LayerStreamer::fetch_next() noexcept {
     return fetch(next);
 }
 
+bool LayerStreamer::prefetch(std::size_t layer_index) const noexcept {
+    if (!source_.is_open() || layer_index >= layers_.size()) {
+        errno = EINVAL;
+        return false;
+    }
+    const LayerDescriptor& layer = layers_[layer_index];
+    const std::uint64_t model_size = source_.file_size();
+    if (layer.byte_size == 0 || layer.file_offset > model_size ||
+        static_cast<std::uint64_t>(layer.byte_size) > model_size - layer.file_offset) {
+        errno = EINVAL;
+        return false;
+    }
+    return source_.prefetch(layer.file_offset, layer.byte_size);
+}
+
 void LayerStreamer::drop() noexcept {
     (void)aabhas::memory::release_ram(mapping_.mapped_base(), mapping_.mapped_size());
     mapping_.unmap();

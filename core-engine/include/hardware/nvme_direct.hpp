@@ -26,6 +26,8 @@ public:
     /** Positional read; callers must satisfy direct-I/O alignment requirements. */
     ssize_t read_at(void* destination, std::size_t bytes,
                     std::uint64_t offset) const noexcept;
+    /** Ask the kernel to read a file range ahead without allocating a user buffer. */
+    bool prefetch(std::uint64_t offset, std::size_t bytes) const noexcept;
     bool seek(std::uint64_t offset) noexcept;
 
     int fd() const noexcept { return fd_; }
