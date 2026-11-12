@@ -20,6 +20,7 @@ NvmeDirectReader::NvmeDirectReader(NvmeDirectReader&& other) noexcept
     other.fd_ = -1;
     other.file_size_ = 0;
     other.position_ = 0;
+    other.alignment_ = 4096;
     other.direct_io_enabled_ = false;
 }
 
@@ -34,6 +35,7 @@ NvmeDirectReader& NvmeDirectReader::operator=(NvmeDirectReader&& other) noexcept
         other.fd_ = -1;
         other.file_size_ = 0;
         other.position_ = 0;
+        other.alignment_ = 4096;
         other.direct_io_enabled_ = false;
     }
     return *this;
@@ -75,6 +77,13 @@ bool NvmeDirectReader::open(const char* path) noexcept {
     fd_ = opened;
     file_size_ = static_cast<std::uint64_t>(metadata.st_size);
     position_ = 0;
+    alignment_ = 4096;
+#if defined(_PC_REC_XFER_ALIGN)
+    const long transfer_alignment = ::fpathconf(fd_, _PC_REC_XFER_ALIGN);
+    if (transfer_alignment > 0) {
+        alignment_ = static_cast<std::size_t>(transfer_alignment);
+    }
+#endif
     (void)::posix_fadvise(fd_, 0, 0, POSIX_FADV_SEQUENTIAL);
 #if defined(POSIX_FADV_NOREUSE)
     (void)::posix_fadvise(fd_, 0, 0, POSIX_FADV_NOREUSE);
@@ -87,7 +96,17 @@ void NvmeDirectReader::close() noexcept {
     fd_ = -1;
     file_size_ = 0;
     position_ = 0;
+    alignment_ = 4096;
     direct_io_enabled_ = false;
+}
+
+bool NvmeDirectReader::direct_request_aligned(const void* destination,
+                                              std::size_t bytes,
+                                              std::uint64_t offset) const noexcept {
+    if (!direct_io_enabled_) return true;
+    if (destination == nullptr || alignment_ == 0) return false;
+    const auto address = reinterpret_cast<std::uintptr_t>(destination);
+    return address % alignment_ == 0 && offset % alignment_ == 0 && bytes % alignment_ == 0;
 }
 
 ssize_t NvmeDirectReader::read(void* destination, std::size_t bytes) noexcept {
@@ -96,6 +115,10 @@ ssize_t NvmeDirectReader::read(void* destination, std::size_t bytes) noexcept {
         return -1;
     }
     if (bytes == 0) return 0;
+    if (!direct_request_aligned(destination, bytes, position_)) {
+        errno = EINVAL;
+        return -1;
+    }
     const std::size_t limit = static_cast<std::size_t>(std::numeric_limits<ssize_t>::max());
     const std::size_t request = bytes > limit ? limit : bytes;
     for (;;) {
@@ -117,6 +140,10 @@ ssize_t NvmeDirectReader::read_at(void* destination, std::size_t bytes,
     if (bytes == 0) return 0;
     if (offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
         errno = EOVERFLOW;
+        return -1;
+    }
+    if (!direct_request_aligned(destination, bytes, offset)) {
+        errno = EINVAL;
         return -1;
     }
     const std::size_t limit = static_cast<std::size_t>(std::numeric_limits<ssize_t>::max());

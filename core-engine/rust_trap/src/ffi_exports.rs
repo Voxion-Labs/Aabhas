@@ -5,6 +5,9 @@ use std::ffi::{c_char, CStr};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Mutex, OnceLock};
 
+/// Maximum accepted model-path payload, excluding the NUL terminator.
+pub const MAX_MODEL_PATH_BYTES: usize = 4096;
+
 unsafe extern "C" {
     fn aabhas_native_start(model_path: *const c_char) -> i32;
     fn aabhas_native_stop() -> i32;
@@ -40,7 +43,16 @@ fn start_inner(model_path: *const c_char) -> i32 {
     }
 
     // The caller owns this memory and must provide a valid NUL-terminated C string.
-    let path = unsafe { CStr::from_ptr(model_path) };
+    // strnlen prevents an unbounded scan across the FFI boundary.
+    let length = unsafe { libc::strnlen(model_path, MAX_MODEL_PATH_BYTES + 1) };
+    if length > MAX_MODEL_PATH_BYTES {
+        return STATUS_INVALID_ARGUMENT;
+    }
+    let path = unsafe {
+        CStr::from_bytes_with_nul_unchecked(std::slice::from_raw_parts(
+            model_path.cast::<u8>(), length + 1,
+        ))
+    };
     if path.to_bytes().is_empty() {
         return STATUS_INVALID_ARGUMENT;
     }

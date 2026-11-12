@@ -26,10 +26,12 @@ func (e StatusError) Error() string {
 
 var nativeCallMu sync.Mutex
 
+const maxModelPathBytes = 4096
+
 // Start validates and starts one native model instance.
 // The model path is copied into C-owned memory for the duration of the call.
 func Start(modelPath string) error {
-	if modelPath == "" {
+	if modelPath == "" || len(modelPath) > maxModelPathBytes {
 		return StatusError{Code: int(C.AABHAS_STATUS_INVALID_ARGUMENT)}
 	}
 	for i := 0; i < len(modelPath); i++ {

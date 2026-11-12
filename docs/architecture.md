@@ -80,10 +80,16 @@ The Rust library is built as a `cdylib` and exposes only
 Each entry point catches panics so Rust unwinding cannot cross the C ABI.
 
 The RAM capper reads host physical memory through `sysinfo` and rejects a start
-when reported used memory is at or above 70% of total memory. The SSD reserve
-probe uses `statvfs` on the model path and requires at least 20 GiB of blocks
-available to the calling process. A failed probe is a health-check failure, not
-an implicit permission to continue.
+when reported used memory is at or above 70% of total memory. When cgroup v2
+memory files are available, the same strict boundary is evaluated against the
+container limit and current usage as well. The SSD reserve probe uses `statvfs`
+on the model path and requires at least 20 GiB of blocks available to the
+calling process; `AABHAS_MIN_FREE_BYTES` can only increase that reserve. A
+failed probe is a health-check failure, not an implicit permission to continue.
+
+The C ABI bounds model paths to 4096 bytes. Direct-I/O reads validate the
+destination address, offset, and length against the file's probed transfer
+alignment before issuing a syscall.
 
 These checks are admission controls. They do not replace cgroup or Kubernetes
 memory limits, filesystem quotas, or operating-system monitoring. Production

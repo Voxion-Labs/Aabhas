@@ -42,11 +42,19 @@ pub fn snapshot(path: &CStr) -> io::Result<StorageSnapshot> {
 
     Ok(StorageSnapshot {
         available_bytes,
-        reserve_bytes: MIN_FREE_BYTES,
+        reserve_bytes: required_reserve_bytes(),
     })
 }
 
 /// Return whether the filesystem containing `path` satisfies the reserve.
 pub fn has_reserve(path: &CStr) -> io::Result<bool> {
     Ok(snapshot(path)?.has_reserve())
+}
+
+/// Return the configured reserve, never permitting a value below the default.
+pub fn required_reserve_bytes() -> u64 {
+    std::env::var("AABHAS_MIN_FREE_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map_or(MIN_FREE_BYTES, |value| value.max(MIN_FREE_BYTES))
 }

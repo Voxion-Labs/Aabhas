@@ -38,6 +38,9 @@ public:
     bool is_open() const noexcept { return fd_ >= 0; }
 
 private:
+    bool direct_request_aligned(const void* destination, std::size_t bytes,
+                                std::uint64_t offset) const noexcept;
+
     int fd_{-1};
     std::uint64_t file_size_{0};
     std::uint64_t position_{0};
