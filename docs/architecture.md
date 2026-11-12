@@ -101,12 +101,16 @@ The daemon exposes:
 
 * `POST /api/v1/engine/start` with `{ "model_path": "..." }`.
 * `POST /api/v1/engine/stop` with an empty body.
+* `GET /api/v1/engine/status` with lifecycle counters and current model state.
+* `POST` and `GET /api/v1/models` for validated model metadata registration.
 
-Handlers enforce POST, bounded request bodies, strict JSON decoding, and
-bounded server timeouts. `ExecutionController` provides a mutex-protected
-single-model lease and atomic lifecycle counters. `LayerManager` tracks layer
-descriptors and transitions them through queued, streaming, loaded, dropped,
-and failed states without owning tensor bytes.
+Handlers enforce method checks, bounded request bodies, strict JSON decoding,
+request cancellation checks, and bounded server timeouts. `ExecutionController`
+provides a mutex-protected single-model lease and atomic lifecycle counters;
+failed starts cancel their lease without inflating stop counts. `ModelRegistry`
+stores only validated file metadata. `LayerManager` tracks layer descriptors and
+transitions them through queued, streaming, loaded, dropped, and failed states
+without owning tensor bytes.
 
 The daemon handles SIGINT and SIGTERM, shuts down HTTP acceptance, and calls
 the native stop function on every normal exit path. Native status codes are

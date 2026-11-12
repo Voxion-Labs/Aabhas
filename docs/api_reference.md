@@ -40,6 +40,7 @@ Content-Type: application/json
 | `model_path` | string | yes | Absolute or deployment-local path to the model file. The path must not contain a NUL byte. |
 
 The request body is limited to 1 MiB and unknown JSON fields are rejected.
+Model paths are limited to 4096 bytes by the native boundary.
 
 ### Success response
 
@@ -90,6 +91,33 @@ curl --fail-with-body --silent --show-error \
   -X POST 'http://127.0.0.1:8080/api/v1/engine/stop'
 ```
 
+## Engine status
+
+### Request
+
+```http
+GET /api/v1/engine/status HTTP/1.1
+Host: 127.0.0.1:8080
+```
+
+The response reports whether the single-model execution lease is running and
+includes lifecycle counters. Responses carry `X-Aabhas-API-Version: v1`.
+
+## Model registry
+
+Register a readable, non-empty model file:
+
+```http
+POST /api/v1/models HTTP/1.1
+Host: 127.0.0.1:8080
+Content-Type: application/json
+
+{"model_path":"/models/example/model.bin"}
+```
+
+`GET /api/v1/models` returns deterministic metadata records. The registry
+stores paths and file metadata only; it never copies model contents.
+
 ## Error responses
 
 Error responses use the following shape:
@@ -127,6 +155,8 @@ The standard-library CLI uses the same endpoints:
   -model /models/example/model.bin
 
 ./bin/aabhas-cli stop -addr 127.0.0.1:8080
+
+./bin/aabhas-cli status -addr 127.0.0.1:8080
 ```
 
 The CLI returns a non-zero exit code for transport failures, malformed

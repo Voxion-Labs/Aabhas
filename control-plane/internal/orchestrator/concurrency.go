@@ -83,6 +83,24 @@ func (l *ExecutionLease) Release() error {
 	return nil
 }
 
+// Cancel relinquishes a lease after native start failed without counting a
+// stop for an engine that never became active.
+func (l *ExecutionLease) Cancel() error {
+	if l == nil || l.controller == nil {
+		return ErrLeaseReleased
+	}
+	if l.released.Swap(true) {
+		return ErrLeaseReleased
+	}
+	l.once.Do(func() {
+		l.controller.mu.Lock()
+		l.controller.modelPath = ""
+		l.controller.active.Store(false)
+		l.controller.mu.Unlock()
+	})
+	return nil
+}
+
 // Release stops the currently active model when the caller does not retain a
 // lease. It is intended for shutdown paths and returns an idle error.
 func (c *ExecutionController) Release() error {

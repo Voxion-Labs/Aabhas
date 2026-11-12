@@ -30,6 +30,8 @@ func main() {
 		exitCode = runStart(os.Args[2:])
 	case "stop":
 		exitCode = runStop(os.Args[2:])
+	case "status":
+		exitCode = runStatus(os.Args[2:])
 	case "help", "-h", "--help":
 		usage()
 		return
@@ -74,7 +76,26 @@ func runStop(args []string) int {
 	return callDaemon(*address, "/api/v1/engine/stop", nil, *timeout)
 }
 
+func runStatus(args []string) int {
+	flags := flag.NewFlagSet("status", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	address := flags.String("addr", envOr("AABHAS_LISTEN_ADDR", "127.0.0.1:8080"), "daemon address")
+	timeout := flags.Duration("timeout", 15*time.Second, "HTTP request timeout")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "aabhas-cli: status accepts no positional arguments")
+		return 2
+	}
+	return callDaemonMethod(http.MethodGet, *address, "/api/v1/engine/status", nil, *timeout)
+}
+
 func callDaemon(address, path string, payload any, timeout time.Duration) int {
+	return callDaemonMethod(http.MethodPost, address, path, payload, timeout)
+}
+
+func callDaemonMethod(method, address, path string, payload any, timeout time.Duration) int {
 	if timeout <= 0 {
 		fmt.Fprintln(os.Stderr, "aabhas-cli: timeout must be positive")
 		return 2
@@ -94,7 +115,7 @@ func callDaemon(address, path string, payload any, timeout time.Duration) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+path, body)
+	request, err := http.NewRequestWithContext(ctx, method, base+path, body)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "aabhas-cli: create request: %v\n", err)
 		return 1
@@ -139,4 +160,5 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  aabhas-cli start -model PATH [-addr HOST:PORT] [-timeout DURATION]")
 	fmt.Fprintln(os.Stderr, "  aabhas-cli stop [-addr HOST:PORT] [-timeout DURATION]")
+	fmt.Fprintln(os.Stderr, "  aabhas-cli status [-addr HOST:PORT] [-timeout DURATION]")
 }

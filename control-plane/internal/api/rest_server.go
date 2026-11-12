@@ -9,14 +9,20 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Voxion-Labs/Aabhas/control-plane/internal/cgo_bridge"
+	"github.com/Voxion-Labs/Aabhas/control-plane/internal/orchestrator"
 )
 
-const maxStartBodyBytes = 1 << 20
+const maxRequestBodyBytes = 1 << 20
 
 type startRequest struct {
+	ModelPath string `json:"model_path"`
+}
+
+type modelRegisterRequest struct {
 	ModelPath string `json:"model_path"`
 }
 
@@ -26,10 +32,26 @@ type response struct {
 	Code   int    `json:"code,omitempty"`
 }
 
+type engineStatusResponse struct {
+	Status         string `json:"status"`
+	ModelPath      string `json:"model_path,omitempty"`
+	Generation     uint64 `json:"generation"`
+	Starts         uint64 `json:"starts"`
+	Stops          uint64 `json:"stops"`
+	RejectedStarts uint64 `json:"rejected_starts"`
+}
+
+type modelsResponse struct {
+	Models []orchestrator.ModelRecord `json:"models"`
+}
+
 // Server owns the HTTP server and its engine lifecycle handlers.
 type Server struct {
-	httpServer *http.Server
-	logger     *log.Logger
+	httpServer  *http.Server
+	logger      *log.Logger
+	controller  *orchestrator.ExecutionController
+	registry    *orchestrator.ModelRegistry
+	lifecycleMu sync.Mutex
 }
 
 // NewServer constructs a bounded-timeout REST server on addr.
@@ -38,10 +60,16 @@ func NewServer(addr string, logger *log.Logger) *Server {
 		logger = log.Default()
 	}
 
-	server := &Server{logger: logger}
+	server := &Server{
+		logger:     logger,
+		controller: orchestrator.NewExecutionController(),
+		registry:   orchestrator.NewModelRegistry(),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/engine/start", server.handleStart)
 	mux.HandleFunc("/api/v1/engine/stop", server.handleStop)
+	mux.HandleFunc("/api/v1/engine/status", server.handleStatus)
+	mux.HandleFunc("/api/v1/models", server.handleModels)
 	server.httpServer = &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -68,30 +96,41 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
 		return
 	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 
 	var request startRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxStartBodyBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		writeJSON(w, http.StatusBadRequest, response{Error: "invalid JSON request"})
-		return
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		writeJSON(w, http.StatusBadRequest, response{Error: "request must contain one JSON object"})
+	if !decodeJSON(w, r, &request) {
 		return
 	}
 	if strings.TrimSpace(request.ModelPath) == "" || strings.IndexByte(request.ModelPath, 0) >= 0 {
 		writeJSON(w, http.StatusBadRequest, response{Error: "model_path is required"})
 		return
 	}
+	if err := r.Context().Err(); err != nil {
+		writeJSON(w, http.StatusRequestTimeout, response{Error: "request canceled"})
+		return
+	}
+
+	lease, err := s.controller.Acquire(request.ModelPath)
+	if err != nil {
+		writeControlError(w, err)
+		return
+	}
 
 	if err := cgo_bridge.Start(request.ModelPath); err != nil {
+		_ = lease.Cancel()
 		s.logger.Printf("engine start rejected: %v", err)
 		writeEngineError(w, err)
+		return
+	}
+	if err := r.Context().Err(); err != nil {
+		_ = cgo_bridge.Stop()
+		_ = lease.Cancel()
+		writeJSON(w, http.StatusRequestTimeout, response{Error: "request canceled"})
 		return
 	}
 	s.logger.Printf("engine started for model path %q", request.ModelPath)
@@ -101,17 +140,94 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
 		return
 	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 
 	if err := cgo_bridge.Stop(); err != nil {
 		s.logger.Printf("engine stop failed: %v", err)
 		writeEngineError(w, err)
 		return
 	}
+	_ = s.controller.Release()
 	s.logger.Printf("engine stopped")
 	writeJSON(w, http.StatusOK, response{Status: "stopped"})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+		return
+	}
+	stats := s.controller.Stats()
+	status := "stopped"
+	if stats.Active {
+		status = "running"
+	}
+	writeJSON(w, http.StatusOK, engineStatusResponse{
+		Status:         status,
+		ModelPath:      stats.ModelPath,
+		Generation:     stats.Generation,
+		Starts:         stats.Starts,
+		Stops:          stats.Stops,
+		RejectedStarts: stats.RejectedStarts,
+	})
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, modelsResponse{Models: s.registry.List()})
+	case http.MethodPost:
+		var request modelRegisterRequest
+		if !decodeJSON(w, r, &request) {
+			return
+		}
+		if strings.TrimSpace(request.ModelPath) == "" || strings.IndexByte(request.ModelPath, 0) >= 0 {
+			writeJSON(w, http.StatusBadRequest, response{Error: "model_path is required"})
+			return
+		}
+		record, err := s.registry.Register(request.ModelPath)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, struct {
+			Model orchestrator.ModelRecord `json:"model"`
+		}{Model: record})
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+	}
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeJSON(w, http.StatusBadRequest, response{Error: "invalid JSON request"})
+		return false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, response{Error: "request must contain one JSON object"})
+		return false
+	}
+	return true
+}
+
+func writeControlError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, orchestrator.ErrEngineBusy):
+		writeJSON(w, http.StatusConflict, response{Error: err.Error()})
+	case errors.Is(err, orchestrator.ErrEmptyModelPath):
+		writeJSON(w, http.StatusBadRequest, response{Error: err.Error()})
+	default:
+		writeJSON(w, http.StatusServiceUnavailable, response{Error: err.Error()})
+	}
 }
 
 func writeEngineError(w http.ResponseWriter, err error) {
@@ -145,7 +261,8 @@ const (
 	CgoStatusNotStarted      = -7
 )
 
-func writeJSON(w http.ResponseWriter, status int, value response) {
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("X-Aabhas-API-Version", "v1")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
