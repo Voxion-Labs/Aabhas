@@ -25,4 +25,5 @@ control surface while preserving the single-model execution invariant.
 ## Explicit non-goals
 
 Authentication, authorization, metrics export, and multi-model scheduling are
-later hardening phases. The API remains loopback-oriented by default.
+later hardening phases. Phase 8 adds optional bearer-token authentication; the
+API remains loopback-oriented by default when no token is configured.

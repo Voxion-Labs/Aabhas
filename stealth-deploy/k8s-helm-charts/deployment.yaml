@@ -33,6 +33,12 @@ spec:
           env:
             - name: AABHAS_LISTEN_ADDR
               value: 0.0.0.0:8080
+            - name: AABHAS_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aabhas-api-auth
+                  key: token
+                  optional: true
           ports:
             - name: http
               containerPort: 8080

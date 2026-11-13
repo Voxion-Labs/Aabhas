@@ -1,6 +1,7 @@
 //! Minimal C ABI for the Aabhas control plane.
 
 use crate::health::{ram_capper, ssd_reserve};
+use crate::security::license_gate;
 use std::ffi::{c_char, CStr};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Mutex, OnceLock};
@@ -29,6 +30,8 @@ pub const STATUS_HEALTH_CHECK: i32 = -5;
 pub const STATUS_INTERNAL_PANIC: i32 = -6;
 /// Stop was requested while no engine instance was active.
 pub const STATUS_NOT_STARTED: i32 = -7;
+/// Enterprise license or hardware binding rejected the start.
+pub const STATUS_LICENSE_REJECTED: i32 = -8;
 
 struct EngineState;
 
@@ -74,6 +77,9 @@ fn start_inner(model_path: *const c_char) -> i32 {
         Ok(true) => {}
         Ok(false) => return STATUS_SSD_RESERVE,
         Err(_) => return STATUS_HEALTH_CHECK,
+    }
+    if license_gate::enforce_if_configured().is_err() {
+        return STATUS_LICENSE_REJECTED;
     }
 
     let native_status = unsafe { aabhas_native_start(model_path) };

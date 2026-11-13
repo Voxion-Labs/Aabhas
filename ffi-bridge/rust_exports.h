@@ -15,7 +15,8 @@ enum {
     AABHAS_STATUS_SSD_RESERVE = -4,
     AABHAS_STATUS_HEALTH_CHECK = -5,
     AABHAS_STATUS_INTERNAL_PANIC = -6,
-    AABHAS_STATUS_NOT_STARTED = -7
+    AABHAS_STATUS_NOT_STARTED = -7,
+    AABHAS_STATUS_LICENSE_REJECTED = -8
 };
 
 int32_t start_aabhas_engine(const char* model_path);

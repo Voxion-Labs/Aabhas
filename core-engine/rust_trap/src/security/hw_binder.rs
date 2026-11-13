@@ -52,11 +52,7 @@ pub fn validate_hardware_binding(
     }
 }
 
-/// Validate both the hardware binding and the signature envelope.
-///
-/// The current verifier intentionally fails closed because it is a structural
-/// verifier only. A real Ed25519/RSA backend must replace it before licenses
-/// can be authorized in production.
+/// Validate both the normalized hardware binding and the Ed25519 signature.
 pub fn validate_license(
     actual_hardware_uuid: &str,
     license: &LicenseConfiguration<'_>,
@@ -70,8 +66,10 @@ pub fn validate_license(
     .map_err(|error| match error {
         SignatureError::InvalidPublicKeyLength
         | SignatureError::InvalidSignatureLength
+        | SignatureError::InvalidPublicKeyMaterial
+        | SignatureError::InvalidSignatureMaterial
         | SignatureError::EmptyPayload
-        | SignatureError::UnsupportedAlgorithm => BindingError::SignatureRejected,
+        | SignatureError::VerificationFailed => BindingError::SignatureRejected,
     })
 }
 
@@ -96,7 +94,7 @@ fn normalize_uuid(value: &str) -> Option<NormalizedUuid> {
         normalized.bytes[normalized.len] = byte.to_ascii_lowercase();
         normalized.len += 1;
     }
-    if normalized.len == 0 {
+    if normalized.len != 32 {
         None
     } else {
         Some(normalized)

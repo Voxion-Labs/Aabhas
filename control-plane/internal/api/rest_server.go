@@ -3,11 +3,13 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -72,7 +74,7 @@ func NewServer(addr string, logger *log.Logger) *Server {
 	mux.HandleFunc("/api/v1/models", server.handleModels)
 	server.httpServer = &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           requireBearerToken(mux, os.Getenv("AABHAS_API_TOKEN")),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -80,6 +82,24 @@ func NewServer(addr string, logger *log.Logger) *Server {
 		MaxHeaderBytes:    1 << 20,
 	}
 	return server
+}
+
+func requireBearerToken(next http.Handler, configured string) http.Handler {
+	token := strings.TrimSpace(configured)
+	if token == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "Bearer "
+		authorization := r.Header.Get("Authorization")
+		if len(authorization) <= len(prefix) || !strings.EqualFold(authorization[:len(prefix)], prefix) ||
+			subtle.ConstantTimeCompare([]byte(authorization[len(prefix):]), []byte(token)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="aabhas"`)
+			writeJSON(w, http.StatusUnauthorized, response{Error: "bearer authentication required"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ListenAndServe starts accepting HTTP requests.
@@ -245,6 +265,8 @@ func writeEngineError(w http.ResponseWriter, err error) {
 			status = http.StatusInsufficientStorage
 		case int(CgoStatusNotStarted):
 			status = http.StatusConflict
+		case int(CgoStatusLicenseRejected):
+			status = http.StatusForbidden
 		}
 		writeJSON(w, status, response{Error: err.Error(), Code: nativeError.Code})
 		return
@@ -259,6 +281,7 @@ const (
 	CgoStatusRamThrottled    = -3
 	CgoStatusSsdReserve      = -4
 	CgoStatusNotStarted      = -7
+	CgoStatusLicenseRejected = -8
 )
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

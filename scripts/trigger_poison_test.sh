@@ -37,7 +37,23 @@ export AABHAS_LICENSED_HARDWARE_UUID="00000000-0000-0000-0000-000000000002"
 cat >"${HARNESS}" <<'RS'
 mod security {
     pub mod crypto_verify {
-        include!(concat!(env!("AABHAS_REPO_ROOT"), "/core-engine/rust_trap/src/security/crypto_verify.rs"));
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub enum SignatureError {
+            InvalidPublicKeyLength,
+            InvalidSignatureLength,
+            InvalidPublicKeyMaterial,
+            InvalidSignatureMaterial,
+            EmptyPayload,
+            VerificationFailed,
+        }
+
+        pub fn verify_license_signature(
+            _public_key: &[u8],
+            _payload: &[u8],
+            _signature: &[u8],
+        ) -> Result<(), SignatureError> {
+            Err(SignatureError::VerificationFailed)
+        }
     }
     pub mod hw_binder {
         include!(concat!(env!("AABHAS_REPO_ROOT"), "/core-engine/rust_trap/src/security/hw_binder.rs"));

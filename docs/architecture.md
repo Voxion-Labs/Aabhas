@@ -144,6 +144,12 @@ workspace mount rather than baking credentials or model data into an image.
 
 ## Security boundaries
 
+When `AABHAS_API_TOKEN` is configured, the Go server enforces bearer
+authentication with constant-time comparison before dispatching any API
+handler. When `AABHAS_LICENSE_REQUIRED=1` is configured, the Rust gate
+requires a valid Ed25519 signature and matching normalized hardware UUID before
+native startup.
+
 The repository release workflow is the only workflow granted `contents: write`.
 It runs after successful main-branch CI, uses the GitHub Actions bot identity,
 and writes generated release metadata in addition to publishing release

@@ -21,6 +21,10 @@ Content type for requests with a body:
 application/json
 ```
 
+If `AABHAS_API_TOKEN` is configured, every API request must include
+`Authorization: Bearer <token>`. Keep the token in a deployment secret; it is
+never returned by the API.
+
 ## Start the engine
 
 ### Request
@@ -139,6 +143,7 @@ Error responses use the following shape:
 | `429 Too Many Requests` | `-3` | Host RAM is at or above the strict 70% admission threshold. |
 | `507 Insufficient Storage` | `-4` | The model filesystem has less than 20 GiB available. |
 | `503 Service Unavailable` | `-5` or `-6` | Native health check failure or recovered internal panic. |
+| `403 Forbidden` | `-8` | Configured enterprise license or hardware binding was rejected. |
 | `405 Method Not Allowed` | — | The endpoint requires `POST`. |
 
 An idle stop is intentionally idempotent in the Go bridge and returns the same
@@ -171,8 +176,8 @@ responses, and non-2xx HTTP responses. `-timeout` accepts a Go duration such as
   start succeeds.
 * SIGINT and SIGTERM cause the daemon to call the native stop function during
   shutdown.
-* The API is not an authentication layer. Bind it to loopback or place it
-  behind an authenticated, mutually trusted control-plane proxy.
+* Without `AABHAS_API_TOKEN`, the API is not an authentication layer. Bind it
+  to loopback or place it behind an authenticated, mutually trusted proxy.
 
 ## Compatibility
 
