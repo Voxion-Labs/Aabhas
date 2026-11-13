@@ -135,6 +135,9 @@ For a deterministic stripped release archive:
 AABHAS_RELEASE_VERSION=local-test ./scripts/build_release.sh
 ```
 
+The archive contains both `aabhas-daemon` and `aabhas-cli`, the native
+`libaabhas.so`, the license, and a SHA-256 sidecar.
+
 ## Run the daemon
 
 The daemon defaults to `127.0.0.1:8080`:

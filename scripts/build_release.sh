@@ -22,6 +22,7 @@ die() {
 command -v git >/dev/null 2>&1 || die "git is required"
 command -v tar >/dev/null 2>&1 || die "tar is required"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
+command -v strip >/dev/null 2>&1 || die "strip is required"
 command -v docker >/dev/null 2>&1 || die "Docker is required for the isolated release build"
 
 case "${VERSION}" in
@@ -46,12 +47,14 @@ cleanup() {
 trap cleanup EXIT
 
 docker cp "${container_id}:/out/bin/aabhas-daemon" "${STAGE_DIR}/bin/aabhas-daemon"
+docker cp "${container_id}:/out/bin/aabhas-cli" "${STAGE_DIR}/bin/aabhas-cli"
 docker cp "${container_id}:/out/lib/libaabhas.so" "${STAGE_DIR}/lib/libaabhas.so"
 cp -- "${REPO_ROOT}/LICENSE" "${STAGE_DIR}/LICENSE"
 
 strip --strip-unneeded "${STAGE_DIR}/bin/aabhas-daemon" 2>/dev/null || true
+strip --strip-unneeded "${STAGE_DIR}/bin/aabhas-cli" 2>/dev/null || true
 strip --strip-unneeded "${STAGE_DIR}/lib/libaabhas.so" 2>/dev/null || true
-chmod 0555 "${STAGE_DIR}/bin/aabhas-daemon" "${STAGE_DIR}/lib/libaabhas.so"
+chmod 0555 "${STAGE_DIR}/bin/aabhas-daemon" "${STAGE_DIR}/bin/aabhas-cli" "${STAGE_DIR}/lib/libaabhas.so"
 chmod 0444 "${STAGE_DIR}/LICENSE"
 
 tar --sort=name --owner=0 --group=0 --numeric-owner \

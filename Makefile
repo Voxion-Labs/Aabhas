@@ -44,7 +44,7 @@ test-core:
 test-rust: test-core
 	@cd core-engine/rust_trap && cargo test
 
-test-control: test-core
+test-control: test-rust
 	@cd control-plane && go test -race -count=1 ./...
 	@cd control-plane && go vet ./...
 
@@ -65,9 +65,7 @@ nuke: clean
 	@echo "✅ All traces erased. No evidence left."
 
 safe-test:
-	@echo "Booting Sandbox Containment Zone..."
-	@# Add your docker run or VM script here later
-	@echo "✅ Sandbox checks passed."
+	@$(MAKE) test
 
 # --- THE GIT HUSTLE (Bot-Safe Workflow) ---
 sync:

@@ -103,6 +103,8 @@ The daemon exposes:
 * `POST /api/v1/engine/stop` with an empty body.
 * `GET /api/v1/engine/status` with lifecycle counters and current model state.
 * `POST` and `GET /api/v1/models` for validated model metadata registration.
+* `GET /metrics` for protected Prometheus-compatible operational metrics.
+* `GET /healthz` and `GET /readyz` for non-sensitive orchestrator probes.
 
 Handlers enforce method checks, bounded request bodies, strict JSON decoding,
 request cancellation checks, and bounded server timeouts. `ExecutionController`
