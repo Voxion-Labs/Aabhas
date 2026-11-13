@@ -228,6 +228,11 @@ in Compose/Kubernetes configurations, and drops capabilities except the
 explicitly requested `IPC_LOCK` capability. Host SSD paths should be mounted
 read-only for model consumption.
 
+Container health is exposed through `/healthz` and `/readyz`; the production
+image and Compose configuration use the bundled `aabhas-cli health` probe.
+Kubernetes deployments require the `aabhas-api-auth` Secret with a `token` key
+for control-plane authentication.
+
 For a non-root diagnostic environment:
 
 ```bash

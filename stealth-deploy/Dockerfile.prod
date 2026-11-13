@@ -50,8 +50,11 @@ RUN mkdir -p /out/lib /out/bin \
     && cd control-plane \
     && go build -trimpath -ldflags='-s -w -buildid=' \
         -o /out/bin/aabhas-daemon ./cmd/aabhas-daemon \
+    && go build -trimpath -ldflags='-s -w -buildid=' \
+        -o /out/bin/aabhas-cli ./cmd/aabhas-cli \
     && strip --strip-unneeded /out/bin/aabhas-daemon \
-    && chmod 0555 /out/bin/aabhas-daemon /out/lib/libaabhas.so
+    && strip --strip-unneeded /out/bin/aabhas-cli \
+    && chmod 0555 /out/bin/aabhas-daemon /out/bin/aabhas-cli /out/lib/libaabhas.so
 
 FROM debian:bookworm-slim AS production
 
@@ -67,6 +70,7 @@ RUN groupadd --system --gid 65532 aabhas \
 
 COPY --from=builder /out/lib/libaabhas.so /usr/local/lib/libaabhas.so
 COPY --from=builder /out/bin/aabhas-daemon /usr/local/bin/aabhas-daemon
+COPY --from=builder /out/bin/aabhas-cli /usr/local/bin/aabhas-cli
 COPY --from=builder /workspace/LICENSE /usr/share/doc/aabhas/LICENSE
 
 RUN ldconfig \
@@ -82,3 +86,5 @@ USER 65532:65532
 EXPOSE 8080
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/aabhas-daemon"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["/usr/local/bin/aabhas-cli", "health", "-addr", "127.0.0.1:8080", "-timeout", "2s"]

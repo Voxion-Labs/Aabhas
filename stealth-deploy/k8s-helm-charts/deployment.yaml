@@ -38,7 +38,7 @@ spec:
                 secretKeyRef:
                   name: aabhas-api-auth
                   key: token
-                  optional: true
+                  optional: false
           ports:
             - name: http
               containerPort: 8080
@@ -57,19 +57,31 @@ spec:
               cpu: "4"
               memory: "8Gi"
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /readyz
               port: http
+              scheme: HTTP
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 6
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: http
+              scheme: HTTP
             initialDelaySeconds: 15
             periodSeconds: 20
             timeoutSeconds: 2
             failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 30
           volumeMounts:
             - name: model-ssd
               mountPath: /models

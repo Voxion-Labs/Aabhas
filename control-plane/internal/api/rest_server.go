@@ -73,15 +73,28 @@ func NewServer(addr string, logger *log.Logger) *Server {
 		registry:   orchestrator.NewModelRegistry(),
 		metrics:    observability.NewMetrics(),
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/engine/start", server.handleStart)
-	mux.HandleFunc("/api/v1/engine/stop", server.handleStop)
-	mux.HandleFunc("/api/v1/engine/status", server.handleStatus)
-	mux.HandleFunc("/api/v1/models", server.handleModels)
-	mux.HandleFunc("/metrics", server.handleMetrics)
+	protectedMux := http.NewServeMux()
+	protectedMux.HandleFunc("/api/v1/engine/start", server.handleStart)
+	protectedMux.HandleFunc("/api/v1/engine/stop", server.handleStop)
+	protectedMux.HandleFunc("/api/v1/engine/status", server.handleStatus)
+	protectedMux.HandleFunc("/api/v1/models", server.handleModels)
+	protectedMux.HandleFunc("/metrics", server.handleMetrics)
+
+	publicMux := http.NewServeMux()
+	publicMux.HandleFunc("/healthz", server.handleHealth)
+	publicMux.HandleFunc("/readyz", server.handleReady)
+	protected := requireBearerToken(protectedMux, os.Getenv("AABHAS_API_TOKEN"))
+	rootHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz", "/readyz":
+			publicMux.ServeHTTP(w, r)
+		default:
+			protected.ServeHTTP(w, r)
+		}
+	})
 	server.httpServer = &http.Server{
 		Addr:              addr,
-		Handler:           server.instrument(requireBearerToken(mux, os.Getenv("AABHAS_API_TOKEN"))),
+		Handler:           server.instrument(rootHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -248,6 +261,24 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Stops:          stats.Stops,
 		RejectedStarts: stats.RejectedStarts,
 	})
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, response{Status: "ok"})
+}
+
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, response{Status: "ready"})
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {

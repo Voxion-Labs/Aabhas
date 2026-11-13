@@ -29,6 +29,10 @@ All responses include an `X-Request-ID` correlation header. The daemon logs
 request ID, method, route, status, and duration only; request bodies and
 credentials are not logged.
 
+The unauthenticated `/healthz` and `/readyz` endpoints are reserved for
+orchestrator probes. They return only process/readiness status and do not
+expose model metadata or credentials.
+
 ## Start the engine
 
 ### Request

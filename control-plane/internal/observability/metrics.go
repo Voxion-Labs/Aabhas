@@ -180,7 +180,7 @@ func normalizeMethod(method string) string {
 
 func normalizePath(path string) string {
 	switch path {
-	case "/api/v1/engine/start", "/api/v1/engine/stop", "/api/v1/engine/status", "/api/v1/models", "/metrics":
+	case "/api/v1/engine/start", "/api/v1/engine/stop", "/api/v1/engine/status", "/api/v1/models", "/metrics", "/healthz", "/readyz":
 		return path
 	default:
 		return "/other"

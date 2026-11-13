@@ -32,6 +32,8 @@ func main() {
 		exitCode = runStop(os.Args[2:])
 	case "status":
 		exitCode = runStatus(os.Args[2:])
+	case "health":
+		exitCode = runHealth(os.Args[2:])
 	case "help", "-h", "--help":
 		usage()
 		return
@@ -89,6 +91,21 @@ func runStatus(args []string) int {
 		return 2
 	}
 	return callDaemonMethod(http.MethodGet, *address, "/api/v1/engine/status", nil, *timeout)
+}
+
+func runHealth(args []string) int {
+	flags := flag.NewFlagSet("health", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	address := flags.String("addr", envOr("AABHAS_LISTEN_ADDR", "127.0.0.1:8080"), "daemon address")
+	timeout := flags.Duration("timeout", 3*time.Second, "HTTP request timeout")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "aabhas-cli: health accepts no positional arguments")
+		return 2
+	}
+	return callDaemonMethod(http.MethodGet, *address, "/healthz", nil, *timeout)
 }
 
 func callDaemon(address, path string, payload any, timeout time.Duration) int {
@@ -161,4 +178,5 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  aabhas-cli start -model PATH [-addr HOST:PORT] [-timeout DURATION]")
 	fmt.Fprintln(os.Stderr, "  aabhas-cli stop [-addr HOST:PORT] [-timeout DURATION]")
 	fmt.Fprintln(os.Stderr, "  aabhas-cli status [-addr HOST:PORT] [-timeout DURATION]")
+	fmt.Fprintln(os.Stderr, "  aabhas-cli health [-addr HOST:PORT] [-timeout DURATION]")
 }

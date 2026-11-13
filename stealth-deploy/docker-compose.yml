@@ -15,6 +15,12 @@ services:
     # Required only when deployment policy enables memory locking.
     cap_add:
       - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/aabhas-cli", "health", "-addr", "127.0.0.1:8080", "-timeout", "2s"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
     pids_limit: 256
     mem_limit: 8g
     memswap_limit: 8g
@@ -23,7 +29,7 @@ services:
     environment:
       AABHAS_LISTEN_ADDR: "0.0.0.0:8080"
       # Set AABHAS_API_TOKEN in the deployment secret for non-loopback access.
-      AABHAS_API_TOKEN: ""
+      AABHAS_API_TOKEN: "${AABHAS_API_TOKEN:-}"
     volumes:
       - aabhas-models:/models:ro
     tmpfs:
