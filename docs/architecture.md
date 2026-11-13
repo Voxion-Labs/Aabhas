@@ -150,6 +150,11 @@ handler. When `AABHAS_LICENSE_REQUIRED=1` is configured, the Rust gate
 requires a valid Ed25519 signature and matching normalized hardware UUID before
 native startup.
 
+The Go server also emits dependency-free Prometheus metrics at `/metrics` and
+assigns every response an `X-Request-ID`. Metrics use normalized, low-cardinality
+routes; access logs contain request metadata only and never model payloads or
+credentials.
+
 The repository release workflow is the only workflow granted `contents: write`.
 It runs after successful main-branch CI, uses the GitHub Actions bot identity,
 and writes generated release metadata in addition to publishing release

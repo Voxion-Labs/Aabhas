@@ -6,15 +6,18 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Voxion-Labs/Aabhas/control-plane/internal/cgo_bridge"
+	"github.com/Voxion-Labs/Aabhas/control-plane/internal/observability"
 	"github.com/Voxion-Labs/Aabhas/control-plane/internal/orchestrator"
 )
 
@@ -53,7 +56,9 @@ type Server struct {
 	logger      *log.Logger
 	controller  *orchestrator.ExecutionController
 	registry    *orchestrator.ModelRegistry
+	metrics     *observability.Metrics
 	lifecycleMu sync.Mutex
+	requestSeq  atomic.Uint64
 }
 
 // NewServer constructs a bounded-timeout REST server on addr.
@@ -66,15 +71,17 @@ func NewServer(addr string, logger *log.Logger) *Server {
 		logger:     logger,
 		controller: orchestrator.NewExecutionController(),
 		registry:   orchestrator.NewModelRegistry(),
+		metrics:    observability.NewMetrics(),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/engine/start", server.handleStart)
 	mux.HandleFunc("/api/v1/engine/stop", server.handleStop)
 	mux.HandleFunc("/api/v1/engine/status", server.handleStatus)
 	mux.HandleFunc("/api/v1/models", server.handleModels)
+	mux.HandleFunc("/metrics", server.handleMetrics)
 	server.httpServer = &http.Server{
 		Addr:              addr,
-		Handler:           requireBearerToken(mux, os.Getenv("AABHAS_API_TOKEN")),
+		Handler:           server.instrument(requireBearerToken(mux, os.Getenv("AABHAS_API_TOKEN"))),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -82,6 +89,43 @@ func NewServer(addr string, logger *log.Logger) *Server {
 		MaxHeaderBytes:    1 << 20,
 	}
 	return server
+}
+
+type observedResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *observedResponseWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *observedResponseWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (s *Server) instrument(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := fmt.Sprintf("req-%d", s.requestSeq.Add(1))
+		w.Header().Set("X-Request-ID", requestID)
+		observed := &observedResponseWriter{ResponseWriter: w}
+		started := time.Now()
+		next.ServeHTTP(observed, r)
+		status := observed.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		duration := time.Since(started)
+		s.metrics.ObserveRequest(r.Method, r.URL.Path, status, duration)
+		s.logger.Printf("http request_id=%s method=%s path=%s status=%d duration_ms=%d", requestID, r.Method, r.URL.Path, status, duration.Milliseconds())
+	})
 }
 
 func requireBearerToken(next http.Handler, configured string) http.Handler {
@@ -124,35 +168,42 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	var request startRequest
 	if !decodeJSON(w, r, &request) {
+		s.metrics.IncEngineStartFailure()
 		return
 	}
 	if strings.TrimSpace(request.ModelPath) == "" || strings.IndexByte(request.ModelPath, 0) >= 0 {
+		s.metrics.IncEngineStartFailure()
 		writeJSON(w, http.StatusBadRequest, response{Error: "model_path is required"})
 		return
 	}
 	if err := r.Context().Err(); err != nil {
+		s.metrics.IncEngineStartFailure()
 		writeJSON(w, http.StatusRequestTimeout, response{Error: "request canceled"})
 		return
 	}
 
 	lease, err := s.controller.Acquire(request.ModelPath)
 	if err != nil {
+		s.metrics.IncEngineStartFailure()
 		writeControlError(w, err)
 		return
 	}
 
 	if err := cgo_bridge.Start(request.ModelPath); err != nil {
+		s.metrics.IncEngineStartFailure()
 		_ = lease.Cancel()
 		s.logger.Printf("engine start rejected: %v", err)
 		writeEngineError(w, err)
 		return
 	}
 	if err := r.Context().Err(); err != nil {
+		s.metrics.IncEngineStartFailure()
 		_ = cgo_bridge.Stop()
 		_ = lease.Cancel()
 		writeJSON(w, http.StatusRequestTimeout, response{Error: "request canceled"})
 		return
 	}
+	s.metrics.IncEngineStart()
 	s.logger.Printf("engine started for model path %q", request.ModelPath)
 	writeJSON(w, http.StatusOK, response{Status: "started"})
 }
@@ -167,11 +218,13 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	defer s.lifecycleMu.Unlock()
 
 	if err := cgo_bridge.Stop(); err != nil {
+		s.metrics.IncEngineStopFailure()
 		s.logger.Printf("engine stop failed: %v", err)
 		writeEngineError(w, err)
 		return
 	}
 	_ = s.controller.Release()
+	s.metrics.IncEngineStop()
 	s.logger.Printf("engine stopped")
 	writeJSON(w, http.StatusOK, response{Status: "stopped"})
 }
@@ -215,12 +268,26 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, response{Error: err.Error()})
 			return
 		}
+		s.metrics.IncModelRegistration()
 		writeJSON(w, http.StatusCreated, struct {
 			Model orchestrator.ModelRecord `json:"model"`
 		}{Model: record})
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+	}
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	stats := s.controller.Stats()
+	if err := s.metrics.Render(w, stats.Active); err != nil {
+		return
 	}
 }
 

@@ -25,6 +25,10 @@ If `AABHAS_API_TOKEN` is configured, every API request must include
 `Authorization: Bearer <token>`. Keep the token in a deployment secret; it is
 never returned by the API.
 
+All responses include an `X-Request-ID` correlation header. The daemon logs
+request ID, method, route, status, and duration only; request bodies and
+credentials are not logged.
+
 ## Start the engine
 
 ### Request
@@ -121,6 +125,19 @@ Content-Type: application/json
 
 `GET /api/v1/models` returns deterministic metadata records. The registry
 stores paths and file metadata only; it never copies model contents.
+
+## Metrics
+
+```http
+GET /metrics HTTP/1.1
+Host: 127.0.0.1:8080
+```
+
+The endpoint returns Prometheus text exposition data for request counts and
+latencies, authentication failures, lifecycle outcomes, model registrations,
+and the current engine-active gauge. Route labels are normalized to a bounded
+set, and the endpoint uses the same optional bearer authentication as the
+control API.
 
 ## Error responses
 
