@@ -19,7 +19,10 @@ protected when `AABHAS_API_TOKEN` is configured.
 
 The local Windows environment cannot execute the native or Bash portions. CI
 remains the authoritative Linux validation environment; no local toolchain or
-software installation is required by this phase.
+software installation is required by this phase. The Go integration test
+environment explicitly exports the Rust debug-library directory through
+`LD_LIBRARY_PATH`; the cgo `-L` flag alone only solves link-time lookup and
+cannot make a shared object discoverable when the test binary starts.
 
 ## Completion boundary
 

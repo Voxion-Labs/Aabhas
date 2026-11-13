@@ -60,6 +60,8 @@ jobs:
       - name: Test Control-Plane (Go)
         run: go test -race -count=1 ./...
         working-directory: control-plane
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/core-engine/rust_trap/target/debug
 
       - name: Vet Control-Plane (Go)
         run: go vet ./...
