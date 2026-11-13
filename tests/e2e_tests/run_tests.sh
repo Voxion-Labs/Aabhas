@@ -85,4 +85,30 @@ if [[ "${restart_stop_code}" != "200" ]]; then
 	exit 1
 fi
 
+metrics_headers="${WORK_DIR}/metrics.headers"
+metrics_body="${WORK_DIR}/metrics.body"
+metrics_code="$(curl --silent --show-error --dump-header "${metrics_headers}" \
+	--output "${metrics_body}" --write-out '%{http_code}' \
+	"${BASE_URL}/metrics")"
+if [[ "${metrics_code}" != "200" ]]; then
+	echo "run_tests: expected metrics HTTP 200, got ${metrics_code}" >&2
+	cat "${metrics_body}" >&2
+	exit 1
+fi
+grep -Eiq '^X-Request-ID: req-[0-9]+\r?$' "${metrics_headers}" || {
+	echo "run_tests: metrics response did not include a request ID" >&2
+	cat "${metrics_headers}" >&2
+	exit 1
+}
+grep -q '^aabhas_http_requests_total' "${metrics_body}" || {
+	echo "run_tests: metrics response did not include request counters" >&2
+	cat "${metrics_body}" >&2
+	exit 1
+}
+grep -q '^aabhas_engine_active 0$' "${metrics_body}" || {
+	echo "run_tests: metrics response did not report a stopped engine" >&2
+	cat "${metrics_body}" >&2
+	exit 1
+}
+
 echo "Aabhas REST end-to-end test passed"

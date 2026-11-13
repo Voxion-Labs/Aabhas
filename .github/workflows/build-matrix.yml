@@ -45,6 +45,10 @@ jobs:
         run: cargo build --verbose
         working-directory: core-engine/rust_trap
 
+      - name: Test Rust safety grid
+        run: cargo test --verbose
+        working-directory: core-engine/rust_trap
+
       - name: Verify native library artifact
         run: test -f target/debug/libaabhas.so
         working-directory: core-engine/rust_trap
@@ -52,3 +56,18 @@ jobs:
       - name: Build Control-Plane (Go)
         run: go build -v ./...
         working-directory: control-plane
+
+      - name: Test Control-Plane (Go)
+        run: go test -race -count=1 ./...
+        working-directory: control-plane
+
+      - name: Vet Control-Plane (Go)
+        run: go vet ./...
+        working-directory: control-plane
+
+      - name: Validate shell scripts
+        run: |
+          bash -n scripts/*.sh
+          bash -n tests/e2e_tests/run_tests.sh
+          bash -n tests/security_audits/run_valgrind.sh
+          bash -n sandbox/vm-scripts/setup_vm.sh

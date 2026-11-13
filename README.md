@@ -181,6 +181,16 @@ curl --fail-with-body --silent --show-error \
 
 ## Tests and audits
 
+Run the repository quality gates after the required toolchains are available:
+
+```bash
+make test
+```
+
+This runs the native CTest suite, Rust tests, race-enabled Go tests and vet,
+plus shell syntax checks. The CI workflow runs the same categories on every
+push and pull request.
+
 End-to-end lifecycle test:
 
 ```bash

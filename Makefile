@@ -1,5 +1,5 @@
 
-.PHONY: all setup build-core build-go clean nuke safe-test sync push dev
+.PHONY: all setup build-core build-go test test-core test-rust test-control lint-shell clean nuke safe-test sync push dev
 
 CORE_BUILD_DIR ?= core-engine/build
 AABHAS_BUILD_TESTS ?= OFF
@@ -32,6 +32,24 @@ build-go:
 	@cd control-plane && go build -o ../bin/aabhas-cli cmd/aabhas-cli/main.go
 	@cd control-plane && go build -o ../bin/aabhas-daemon cmd/aabhas-daemon/main.go
 	@echo "✅ Go binaries ready."
+
+test: test-core test-rust test-control lint-shell
+	@echo "✅ Native, control-plane, and shell checks passed."
+
+test-core:
+	@cmake -S core-engine -B $(CORE_BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_EXTENSIONS=OFF -DAABHAS_BUILD_TESTS=ON
+	@cmake --build $(CORE_BUILD_DIR) --parallel
+	@ctest --test-dir $(CORE_BUILD_DIR) --output-on-failure
+
+test-rust: test-core
+	@cd core-engine/rust_trap && cargo test
+
+test-control: test-core
+	@cd control-plane && go test -race -count=1 ./...
+	@cd control-plane && go vet ./...
+
+lint-shell:
+	@bash -n scripts/*.sh tests/e2e_tests/run_tests.sh tests/security_audits/run_valgrind.sh sandbox/vm-scripts/setup_vm.sh
 
 # --- CLEANING PROTOCOLS ---
 clean:
