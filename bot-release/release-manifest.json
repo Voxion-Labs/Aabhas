@@ -1,6 +1,6 @@
 {
-  "release_tag": "build-19",
-  "tested_commit": "611651d83b231700cfdabd265e5b8c11030e35d5",
-  "ci_run": 19,
+  "release_tag": "build-20",
+  "tested_commit": "0b6251c1aba05b0b5e6869c3ebc4d55b86e4c3bb",
+  "ci_run": 20,
   "generated_by": "github-actions[bot]"
 }
