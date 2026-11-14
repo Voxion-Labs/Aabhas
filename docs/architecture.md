@@ -114,6 +114,11 @@ stores only validated file metadata. `LayerManager` tracks layer descriptors and
 transitions them through queued, streaming, loaded, dropped, and failed states
 without owning tensor bytes.
 
+The product-format boundary additionally derives checked tensor storage layouts
+for common GGUF quantized blocks and SafeTensors scalar dtypes. Known ranges
+must match their shape-derived byte size; unsupported dtypes remain bounded
+metadata only and are never silently reinterpreted by a kernel.
+
 The daemon handles SIGINT and SIGTERM, shuts down HTTP acceptance, and calls
 the native stop function on every normal exit path. Native status codes are
 translated into stable HTTP responses, including conflict, throttling, and

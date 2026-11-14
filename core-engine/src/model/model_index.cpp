@@ -11,6 +11,93 @@
 #include <utility>
 
 namespace aabhas::model {
+
+bool describe_tensor_layout(TensorDType dtype,
+                            const std::vector<std::uint64_t>& shape,
+                            TensorLayout& layout) noexcept {
+    if (shape.empty()) return false;
+
+    std::uint64_t elements = 1;
+    for (const std::uint64_t extent : shape) {
+        if (extent == 0 || extent > std::numeric_limits<std::uint64_t>::max() / elements) {
+            return false;
+        }
+        elements *= extent;
+    }
+
+    std::uint64_t bytes_per_element = 0;
+    std::uint64_t block_elements = 1;
+    std::uint64_t block_bytes = 0;
+    switch (dtype) {
+    case TensorDType::F32:
+    case TensorDType::I32:
+        bytes_per_element = 4;
+        break;
+    case TensorDType::F64:
+    case TensorDType::I64:
+        bytes_per_element = 8;
+        break;
+    case TensorDType::F16:
+    case TensorDType::BF16:
+    case TensorDType::I16:
+    case TensorDType::U16:
+        bytes_per_element = 2;
+        break;
+    case TensorDType::I8:
+    case TensorDType::U8:
+    case TensorDType::Bool:
+        bytes_per_element = 1;
+        break;
+    case TensorDType::U32:
+        bytes_per_element = 4;
+        break;
+    case TensorDType::U64:
+        bytes_per_element = 8;
+        break;
+    case TensorDType::Q4_0:
+        block_elements = 32;
+        block_bytes = 18;
+        break;
+    case TensorDType::Q4_1:
+        block_elements = 32;
+        block_bytes = 20;
+        break;
+    case TensorDType::Q5_0:
+        block_elements = 32;
+        block_bytes = 22;
+        break;
+    case TensorDType::Q5_1:
+        block_elements = 32;
+        block_bytes = 24;
+        break;
+    case TensorDType::Q8_0:
+        block_elements = 32;
+        block_bytes = 34;
+        break;
+    case TensorDType::Q8_1:
+        block_elements = 32;
+        block_bytes = 40;
+        break;
+    case TensorDType::Unknown:
+        return false;
+    }
+
+    std::uint64_t bytes = 0;
+    if (block_bytes != 0) {
+        if (elements % block_elements != 0 ||
+            elements / block_elements > std::numeric_limits<std::uint64_t>::max() / block_bytes) {
+            return false;
+        }
+        bytes = (elements / block_elements) * block_bytes;
+    } else if (elements > std::numeric_limits<std::uint64_t>::max() / bytes_per_element) {
+        return false;
+    } else {
+        bytes = elements * bytes_per_element;
+    }
+    layout = {elements, bytes};
+    return true;
+}
+
 namespace {
 
 constexpr std::uint64_t max_header_bytes = 64ULL * 1024ULL * 1024ULL;
@@ -139,7 +226,17 @@ TensorDType gguf_dtype(std::uint32_t type) {
     case 0: return TensorDType::F32;
     case 1: return TensorDType::F16;
     case 2: return TensorDType::Q4_0;
+    case 3: return TensorDType::Q4_1;
+    case 6: return TensorDType::Q5_0;
+    case 7: return TensorDType::Q5_1;
     case 8: return TensorDType::Q8_0;
+    case 9: return TensorDType::Q8_1;
+    case 24: return TensorDType::I8;
+    case 25: return TensorDType::I16;
+    case 26: return TensorDType::I32;
+    case 27: return TensorDType::I64;
+    case 28: return TensorDType::F64;
+    case 30: return TensorDType::BF16;
     default: return TensorDType::Unknown;
     }
 }
@@ -233,14 +330,20 @@ IndexResult inspect_gguf(std::ifstream& stream, std::uint64_t file_size) {
             absolute_offset >= file_size) {
             return {{}, IndexError::Malformed};
         }
-        const std::uint64_t end = item + 1 < pending.size()
+        const std::uint64_t range_end = item + 1 < pending.size()
             ? pending[item + 1].offset
             : file_size - data_start;
-        if (end <= relative_offset || end > file_size - data_start) {
+        if (range_end <= relative_offset || range_end > file_size - data_start) {
             return {{}, IndexError::Malformed};
         }
-        index.tensors.push_back({pending[item].name, absolute_offset,
-                                 end - relative_offset, gguf_dtype(pending[item].type),
+        const TensorDType dtype = gguf_dtype(pending[item].type);
+        std::uint64_t byte_size = range_end - relative_offset;
+        TensorLayout layout;
+        if (describe_tensor_layout(dtype, pending[item].shape, layout)) {
+            if (layout.byte_size > byte_size) return {{}, IndexError::Malformed};
+            byte_size = layout.byte_size;
+        }
+        index.tensors.push_back({pending[item].name, absolute_offset, byte_size, dtype,
                                  std::move(pending[item].shape)});
     }
     return {std::move(index), IndexError::None};
@@ -392,10 +495,18 @@ private:
 
 TensorDType safetensors_dtype(const std::string& value) {
     if (value == "F32") return TensorDType::F32;
+    if (value == "F64") return TensorDType::F64;
     if (value == "F16") return TensorDType::F16;
     if (value == "BF16") return TensorDType::BF16;
     if (value == "I8") return TensorDType::I8;
+    if (value == "I16") return TensorDType::I16;
+    if (value == "I32") return TensorDType::I32;
+    if (value == "I64") return TensorDType::I64;
     if (value == "U8") return TensorDType::U8;
+    if (value == "U16") return TensorDType::U16;
+    if (value == "U32") return TensorDType::U32;
+    if (value == "U64") return TensorDType::U64;
+    if (value == "BOOL") return TensorDType::Bool;
     return TensorDType::Unknown;
 }
 
@@ -439,8 +550,13 @@ bool parse_safetensors_tensor(JsonReader& reader, const std::string& name,
         absolute_begin >= absolute_end) {
         return false;
     }
-    descriptor = {name, absolute_begin, absolute_end - absolute_begin,
-                  safetensors_dtype(dtype), std::move(shape)};
+    const TensorDType tensor_dtype = safetensors_dtype(dtype);
+    const std::uint64_t byte_size = absolute_end - absolute_begin;
+    TensorLayout layout;
+    if (describe_tensor_layout(tensor_dtype, shape, layout) && layout.byte_size != byte_size) {
+        return false;
+    }
+    descriptor = {name, absolute_begin, byte_size, tensor_dtype, std::move(shape)};
     return true;
 }
 
@@ -483,6 +599,15 @@ IndexResult inspect_safetensors(std::ifstream& stream, std::uint64_t file_size) 
               [](const TensorDescriptor& lhs, const TensorDescriptor& rhs) {
                   return lhs.file_offset < rhs.file_offset;
               });
+    for (std::size_t item = 1; item < index.tensors.size(); ++item) {
+        const TensorDescriptor& previous = index.tensors[item - 1];
+        const TensorDescriptor& current = index.tensors[item];
+        if (previous.file_offset > std::numeric_limits<std::uint64_t>::max() -
+                                       previous.byte_size ||
+            previous.file_offset + previous.byte_size > current.file_offset) {
+            return {{}, IndexError::Malformed};
+        }
+    }
     return {std::move(index), IndexError::None};
 }
 

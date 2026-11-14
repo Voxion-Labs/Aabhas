@@ -53,6 +53,35 @@ void test_safetensors(const std::filesystem::path& path) {
     assert(result.index.tensors[0].shape == std::vector<std::uint64_t>{1});
 }
 
+void test_tensor_layouts() {
+    aabhas::model::TensorLayout layout;
+    assert(aabhas::model::describe_tensor_layout(
+        aabhas::model::TensorDType::F32, {2, 3}, layout));
+    assert(layout.element_count == 6);
+    assert(layout.byte_size == 24);
+
+    assert(aabhas::model::describe_tensor_layout(
+        aabhas::model::TensorDType::Q4_0, {32}, layout));
+    assert(layout.element_count == 32);
+    assert(layout.byte_size == 18);
+    assert(!aabhas::model::describe_tensor_layout(
+        aabhas::model::TensorDType::Q4_0, {31}, layout));
+}
+
+void test_safetensors_rejects_invalid_ranges(const std::filesystem::path& path) {
+    const std::string header =
+        R"({"first":{"dtype":"F32","shape":[2],"data_offsets":[0,8]},"second":{"dtype":"F32","shape":[2],"data_offsets":[4,12]}})";
+    std::vector<char> bytes;
+    append_u64(bytes, static_cast<std::uint64_t>(header.size()));
+    bytes.insert(bytes.end(), header.begin(), header.end());
+    bytes.insert(bytes.end(), 12, 0);
+    write_file(path, bytes);
+
+    const auto result = aabhas::model::inspect(path.string().c_str());
+    assert(!result);
+    assert(result.error == aabhas::model::IndexError::Malformed);
+}
+
 void test_gguf(const std::filesystem::path& path) {
     std::vector<char> bytes;
     bytes.insert(bytes.end(), {'G', 'G', 'U', 'F'});
@@ -90,9 +119,13 @@ int main() {
         std::filesystem::temp_directory_path() / "aabhas-model-index-test";
     const auto safe_path = base.string() + ".safetensors";
     const auto gguf_path = base.string() + ".gguf";
+    const auto invalid_safe_path = base.string() + ".invalid.safetensors";
+    test_tensor_layouts();
     test_safetensors(safe_path);
+    test_safetensors_rejects_invalid_ranges(invalid_safe_path);
     test_gguf(gguf_path);
     std::filesystem::remove(safe_path);
     std::filesystem::remove(gguf_path);
+    std::filesystem::remove(invalid_safe_path);
     return 0;
 }
