@@ -10,6 +10,7 @@ add_library(aabhas_data_plane STATIC
     src/model/model_index.cpp
     src/tokenizer/tokenizer.cpp
     src/inference/inference_runtime.cpp
+    src/inference/transformer_layers.cpp
     src/scheduler/layer_scheduler.cpp
     src/hardware/nvme_direct.cpp
     src/hardware/nvme_streamer.cpp
@@ -41,10 +42,12 @@ if (AABHAS_BUILD_TESTS)
     add_executable(aabhas_layer_scheduler_test tests/layer_scheduler_test.cpp)
     add_executable(aabhas_inference_runtime_test tests/inference_runtime_test.cpp)
     add_executable(aabhas_tokenizer_test tests/tokenizer_test.cpp)
+    add_executable(aabhas_transformer_layers_test tests/transformer_layers_test.cpp)
     target_compile_features(aabhas_model_index_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_layer_scheduler_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_inference_runtime_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_tokenizer_test PRIVATE cxx_std_17)
+    target_compile_features(aabhas_transformer_layers_test PRIVATE cxx_std_17)
     target_link_libraries(aabhas_model_index_test PRIVATE
         aabhas_data_plane
         Threads::Threads
@@ -61,8 +64,13 @@ if (AABHAS_BUILD_TESTS)
         aabhas_data_plane
         Threads::Threads
     )
+    target_link_libraries(aabhas_transformer_layers_test PRIVATE
+        aabhas_data_plane
+        Threads::Threads
+    )
     add_test(NAME aabhas_model_index_test COMMAND aabhas_model_index_test)
     add_test(NAME aabhas_layer_scheduler_test COMMAND aabhas_layer_scheduler_test)
     add_test(NAME aabhas_inference_runtime_test COMMAND aabhas_inference_runtime_test)
     add_test(NAME aabhas_tokenizer_test COMMAND aabhas_tokenizer_test)
+    add_test(NAME aabhas_transformer_layers_test COMMAND aabhas_transformer_layers_test)
 endif()
