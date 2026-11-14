@@ -73,11 +73,16 @@ mapping. The kernel controls actual page residency; the hints do not promise an
 instantaneous physical-memory reclaim.
 
 The transformer execution boundary resolves GGUF or SafeTensors block tensor
-names, streams those float32 tensors through the scheduler into one bounded
-arena, and executes a complete pre-norm decoder block. Grouped-query attention,
-RoPE, residual paths, gated feed-forward layers, and a bounded KV cache share
-the same allocation-free kernel set for multi-token prefill and single-token
-decode.
+names, streams those float32 or quantized tensors through the scheduler into one
+bounded arena, and executes a complete pre-norm decoder block. Grouped-query
+attention, RoPE, residual paths, gated feed-forward layers, and a bounded KV
+cache share the same allocation-free kernel set for multi-token prefill and
+single-token decode.
+
+Quantized CPU kernels execute directly on GGML block formats (`Q4_0`, `Q4_1`,
+`Q5_0`, `Q5_1`, `Q8_0`, `Q8_1`) and half-precision floats (`F16`, `BF16`),
+providing bounded scalar conversion, direct dot-product accumulation, and
+streaming dequantization across arbitrary scheduler chunk windows.
 
 ### Safety grid
 

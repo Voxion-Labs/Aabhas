@@ -64,6 +64,13 @@ feed-forward residual path. The scheduler can rewind after a completed pass so
 the same bounded arena can serve later tokens without a second model-sized
 allocation.
 
+Quantized CPU kernels extend this boundary to GGML block types (`Q4_0`, `Q4_1`,
+`Q5_0`, `Q5_1`, `Q8_0`, `Q8_1`) and half-precision floats (`F16`, `BF16`).
+`QuantizedStreamDecoder` streams and dequantizes arbitrary scheduler chunk slices
+directly into the layer arena without full-model materialization, while direct
+`vec_dot` and `gemv_quantized` allow matrix-vector evaluation with zero heap
+allocations.
+
 `NvmeDirectReader` owns a raw POSIX file descriptor. On Linux it attempts
 `O_DIRECT` and falls back to buffered `O_RDONLY` when the filesystem does not
 support direct I/O. The fallback is explicit and observable through reader

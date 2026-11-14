@@ -33,10 +33,25 @@ public:
               InferenceConfig config = {});
     void close() noexcept;
 
+    /** Run one streamed row-major matrix-vector tensor (supports F32, F16, BF16, and quantized types). */
+    bool run_matvec(std::size_t tensor_index, const float* input,
+                    std::size_t input_size, float* output,
+                    std::size_t output_size) noexcept;
+
     /** Run one streamed row-major F32 matrix-vector tensor. */
     bool run_f32_matvec(std::size_t tensor_index, const float* input,
                         std::size_t input_size, float* output,
                         std::size_t output_size) noexcept;
+
+    /**
+     * Stream one row-major tensor of any supported dtype, dequantizing into a
+     * caller-owned float32 arena.
+     *
+     * Tensors must be consumed in scheduler order; call rewind_stream() before
+     * starting another full pass over the model.
+     */
+    bool stream_tensor(std::size_t tensor_index, float* destination,
+                       std::size_t capacity_floats) noexcept;
 
     /**
      * Stream one row-major F32 tensor into a caller-owned arena.

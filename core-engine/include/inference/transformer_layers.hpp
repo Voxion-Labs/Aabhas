@@ -2,6 +2,7 @@
 #define AABHAS_INFERENCE_TRANSFORMER_LAYERS_HPP
 
 #include "inference/kv_cache.hpp"
+#include "inference/quantized_kernels.hpp"
 #include "model/model_index.hpp"
 
 #include <cstddef>
@@ -75,6 +76,7 @@ struct TransformerTensorBinding {
     std::size_t tensor_index{0};
     std::size_t offset_floats{0};
     std::size_t float_count{0};
+    aabhas::model::TensorDType dtype{aabhas::model::TensorDType::Unknown};
 };
 
 /** Checked float32 arena layout for every tensor in one decoder block. */

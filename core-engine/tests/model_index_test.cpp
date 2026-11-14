@@ -122,7 +122,8 @@ void test_gguf(const std::filesystem::path& path) {
     assert(result.index.tensors[0].byte_size == 4);
     assert(result.index.tensors[0].dtype == aabhas::model::TensorDType::F32);
     assert(result.index.tensors[0].shape == std::vector<std::uint64_t>{1});
-    assert(result.index.tokenizer.vocabulary == std::vector<std::string>{"hello", "world"});
+    const std::vector<std::string> expected_vocab{"hello", "world"};
+    assert(result.index.tokenizer.vocabulary == expected_vocab);
     assert(result.index.tokenizer.bos_token_id == 0);
     assert(result.index.tokenizer.eos_token_id == 1);
 }

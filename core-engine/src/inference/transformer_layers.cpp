@@ -72,7 +72,7 @@ bool resolve_tensor(const aabhas::model::ModelIndex& model, const std::string& n
             break;
         }
     }
-    if (found == nullptr || found->dtype != aabhas::model::TensorDType::F32 ||
+    if (found == nullptr || !kernels::is_supported_weight_dtype(found->dtype) ||
         !shape_is(found->shape, expected_shape)) {
         return false;
     }
@@ -87,6 +87,7 @@ bool resolve_tensor(const aabhas::model::ModelIndex& model, const std::string& n
     binding.tensor_index = static_cast<std::size_t>(found - model.tensors.data());
     binding.offset_floats = 0;
     binding.float_count = static_cast<std::size_t>(layout.element_count);
+    binding.dtype = found->dtype;
     return true;
 }
 

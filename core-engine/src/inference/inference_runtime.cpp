@@ -23,7 +23,6 @@ bool InferenceRuntime::open(const char* model_path,
         close();
         if (model_path == nullptr || model.tensors.empty() ||
             config.scheduler.chunk_bytes == 0 ||
-            config.scheduler.chunk_bytes % sizeof(float) != 0 ||
             config.max_layer_buffer_bytes == 0) {
             return false;
         }
@@ -77,16 +76,16 @@ bool InferenceRuntime::detokenize(const std::vector<std::uint32_t>& tokens,
     return tokenizer_.decode(tokens, output);
 }
 
-bool InferenceRuntime::run_f32_matvec(std::size_t tensor_index, const float* input,
-                                      std::size_t input_size, float* output,
-                                      std::size_t output_size) noexcept {
+bool InferenceRuntime::run_matvec(std::size_t tensor_index, const float* input,
+                                  std::size_t input_size, float* output,
+                                  std::size_t output_size) noexcept {
     if (input == nullptr || output == nullptr || tensor_index >= model_.tensors.size() ||
         scheduler_.has_current() ||
         scheduler_.stats().next_layer_index != tensor_index) {
         return false;
     }
     const auto& tensor = model_.tensors[tensor_index];
-    if (tensor.dtype != aabhas::model::TensorDType::F32 || tensor.shape.size() != 2) {
+    if (!kernels::is_supported_weight_dtype(tensor.dtype) || tensor.shape.size() != 2) {
         return false;
     }
     if (tensor.shape[0] == 0 || tensor.shape[1] == 0 ||
@@ -96,47 +95,74 @@ bool InferenceRuntime::run_f32_matvec(std::size_t tensor_index, const float* inp
     }
     const std::size_t rows = static_cast<std::size_t>(tensor.shape[0]);
     const std::size_t columns = static_cast<std::size_t>(tensor.shape[1]);
-    std::size_t elements = 0;
-    if (!multiply_checked(rows, columns, elements) ||
-        !multiply_checked(elements, sizeof(float), elements) ||
-        input_size != columns || output_size != rows || tensor.byte_size < elements) {
+    if (input_size != columns || output_size != rows) {
         return false;
     }
+    aabhas::model::TensorLayout layout;
+    if (!aabhas::model::describe_tensor_layout(tensor.dtype, tensor.shape, layout) ||
+        layout.element_count == 0 ||
+        layout.element_count > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) ||
+        layout.byte_size > tensor.byte_size) {
+        return false;
+    }
+    const std::size_t elements = static_cast<std::size_t>(layout.element_count);
 
     std::fill(output, output + rows, 0.0F);
-    if (!scheduler_.next_layer()) return false;
 
-    std::size_t processed = 0;
+    kernels::QuantizedStreamDecoder decoder;
+    if (!decoder.init(tensor.dtype, nullptr, elements)) return false;
+
+    if (!scheduler_.next_layer()) return false;
+    std::size_t total_bytes_read = 0;
     bool complete = false;
+
+    const auto on_block = [&](const float* block_values,
+                              std::size_t block_elem_count,
+                              std::size_t element_offset) {
+        for (std::size_t i = 0; i < block_elem_count; ++i) {
+            const std::size_t elem_idx = element_offset + i;
+            const std::size_t r = elem_idx / columns;
+            const std::size_t c = elem_idx % columns;
+            output[r] += block_values[i] * input[c];
+        }
+    };
+
     while (scheduler_.has_current()) {
         const auto view = scheduler_.current();
-        if (!view || view.size % sizeof(float) != 0) break;
-        const std::size_t values = view.size / sizeof(float);
-        for (std::size_t index = 0; index < values && processed < elements / sizeof(float);
-             ++index, ++processed) {
-            float weight = 0.0F;
-            std::memcpy(&weight, view.data + index * sizeof(float), sizeof(float));
-            output[processed / columns] += weight * input[processed % columns];
+        if (!view || view.size == 0) break;
+        std::size_t to_feed = view.size;
+        if (total_bytes_read + to_feed > layout.byte_size) {
+            to_feed = static_cast<std::size_t>(layout.byte_size - total_bytes_read);
         }
-        if (processed == elements / sizeof(float)) {
+        if (to_feed > 0) {
+            if (!decoder.feed_with_callback(view.data, to_feed, on_block)) break;
+            total_bytes_read += to_feed;
+        }
+        if (decoder.elements_decoded() == elements) {
             complete = true;
             break;
         }
         if (!scheduler_.next_chunk()) break;
     }
     scheduler_.release();
-    return complete;
+    return complete && decoder.finish();
 }
 
-bool InferenceRuntime::stream_f32_tensor(std::size_t tensor_index, float* destination,
-                                         std::size_t capacity_floats) noexcept {
+bool InferenceRuntime::run_f32_matvec(std::size_t tensor_index, const float* input,
+                                      std::size_t input_size, float* output,
+                                      std::size_t output_size) noexcept {
+    return run_matvec(tensor_index, input, input_size, output, output_size);
+}
+
+bool InferenceRuntime::stream_tensor(std::size_t tensor_index, float* destination,
+                                     std::size_t capacity_floats) noexcept {
     if (destination == nullptr || capacity_floats == 0 ||
         tensor_index >= model_.tensors.size() || scheduler_.has_current() ||
         scheduler_.stats().next_layer_index != tensor_index) {
         return false;
     }
     const auto& tensor = model_.tensors[tensor_index];
-    if (tensor.dtype != aabhas::model::TensorDType::F32 || tensor.shape.empty()) {
+    if (!kernels::is_supported_weight_dtype(tensor.dtype) || tensor.shape.empty()) {
         return false;
     }
     aabhas::model::TensorLayout layout;
@@ -150,20 +176,32 @@ bool InferenceRuntime::stream_f32_tensor(std::size_t tensor_index, float* destin
     }
     const std::size_t elements = static_cast<std::size_t>(layout.element_count);
 
+    kernels::QuantizedStreamDecoder decoder;
+    if (!decoder.init(tensor.dtype, destination, elements)) return false;
+
     if (!scheduler_.next_layer()) return false;
-    std::size_t processed = 0;
+    std::size_t total_bytes_read = 0;
     while (scheduler_.has_current()) {
         const auto view = scheduler_.current();
-        if (!view || view.size % sizeof(float) != 0) break;
-        const std::size_t values = view.size / sizeof(float);
-        if (processed > elements || values > elements - processed) break;
-        std::memcpy(destination + processed, view.data, values * sizeof(float));
-        processed += values;
-        if (processed == elements) break;
+        if (!view || view.size == 0) break;
+        std::size_t to_feed = view.size;
+        if (total_bytes_read + to_feed > layout.byte_size) {
+            to_feed = static_cast<std::size_t>(layout.byte_size - total_bytes_read);
+        }
+        if (to_feed > 0) {
+            if (!decoder.feed(view.data, to_feed)) break;
+            total_bytes_read += to_feed;
+        }
+        if (decoder.elements_decoded() == elements) break;
         if (!scheduler_.next_chunk()) break;
     }
     scheduler_.release();
-    return processed == elements;
+    return decoder.finish();
+}
+
+bool InferenceRuntime::stream_f32_tensor(std::size_t tensor_index, float* destination,
+                                         std::size_t capacity_floats) noexcept {
+    return stream_tensor(tensor_index, destination, capacity_floats);
 }
 
 bool InferenceRuntime::load_transformer_layer(const TransformerLayerPlan& plan,
@@ -214,9 +252,9 @@ bool InferenceRuntime::load_transformer_layer(const TransformerLayerPlan& plan,
             arena.clear();
             return false;
         }
-        if (!stream_f32_tensor(item.tensor_index,
-                               arena.data() + item.offset_floats,
-                               item.float_count)) {
+        if (!stream_tensor(item.tensor_index,
+                           arena.data() + item.offset_floats,
+                           item.float_count)) {
             arena.clear();
             scheduler_.rewind();
             return false;
