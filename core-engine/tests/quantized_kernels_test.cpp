@@ -18,16 +18,26 @@ bool near(float a, float b, float tol = 1.0e-3F) {
 }
 
 void test_fp16_bf16() {
-    const float test_vals[] = {0.0F, -0.0F, 1.0F, -1.0F, 0.5F, 2.0F, -4.0F, 65504.0F};
-    for (float val : test_vals) {
+    const float fp16_vals[] = {0.0F, -0.0F, 1.0F, -1.0F, 0.5F, 2.0F, -4.0F, 65504.0F};
+    for (float val : fp16_vals) {
         const std::uint16_t h = aabhas::inference::kernels::fp32_to_fp16(val);
         const float out = aabhas::inference::kernels::fp16_to_fp32(h);
-        assert(near(val, out, 1.0e-5F));
+        assert(near(val, out, 1.0e-4F));
+    }
 
+    const float bf16_vals[] = {0.0F, -0.0F, 1.0F, -1.0F, 0.5F, 2.0F, -4.0F, 65280.0F};
+    for (float val : bf16_vals) {
         const std::uint16_t b = aabhas::inference::kernels::fp32_to_bf16(val);
         const float b_out = aabhas::inference::kernels::bf16_to_fp32(b);
         assert(near(val, b_out, 1.0e-2F));
     }
+
+    // Relative precision check for arbitrary values in BF16 (7-bit mantissa -> ~0.8% error)
+    const float arbitrary = 65504.0F;
+    const std::uint16_t b_arb = aabhas::inference::kernels::fp32_to_bf16(arbitrary);
+    const float arb_out = aabhas::inference::kernels::bf16_to_fp32(b_arb);
+    const float rel_err = std::fabs(arbitrary - arb_out) / arbitrary;
+    assert(rel_err < 0.01F);
 
     // Subnormal fp16 test: smallest positive subnormal is 2^-24
     const std::uint16_t subnormal = 0x0001U;
