@@ -80,6 +80,8 @@ bool describe_tensor_layout(TensorDType dtype,
         break;
     case TensorDType::Unknown:
         return false;
+    default:
+        return false;
     }
 
     std::uint64_t bytes = 0;
