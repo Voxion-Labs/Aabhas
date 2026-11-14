@@ -56,5 +56,45 @@ int main() {
     const float weight = std::exp(1.0F) / (std::exp(1.0F) + 1.0F);
     assert(near(attention_output[0], 2.0F * weight));
     assert(near(attention_output[1], 4.0F * (1.0F - weight)));
+
+    const float strided_keys[] = {1.0F, 0.0F, 99.0F, 0.0F, 1.0F, 99.0F};
+    const float strided_values[] = {2.0F, 0.0F, 99.0F, 0.0F, 4.0F, 99.0F};
+    float strided_output[2]{};
+    assert(aabhas::inference::kernels::causal_attention_strided(
+        attention_query, strided_keys, strided_values, 2, 2, 3, 3, 1.0F,
+        strided_output));
+    assert(near(strided_output[0], attention_output[0]));
+    assert(near(strided_output[1], attention_output[1]));
+    assert(!aabhas::inference::kernels::causal_attention_strided(
+        attention_query, strided_keys, strided_values, 2, 2, 1, 3, 1.0F,
+        strided_output));
+
+    const float linear_weights[] = {1.0F, 2.0F, 3.0F, 4.0F};
+    const float linear_input[] = {1.0F, 1.0F};
+    float linear_output[2]{};
+    assert(aabhas::inference::kernels::linear_f32(
+        linear_weights, 2, 2, linear_input, linear_output));
+    assert(linear_output[0] == 3.0F);
+    assert(linear_output[1] == 7.0F);
+    assert(!aabhas::inference::kernels::linear_f32(
+        linear_weights, 2, 2, linear_output, linear_output));
+
+    aabhas::inference::TransformerBlockConfig block;
+    block.model_dimension = 4;
+    block.head_count = 2;
+    block.kv_head_count = 1;
+    block.head_dimension = 2;
+    block.intermediate_dimension = 4;
+    assert(aabhas::inference::transformer_block_scratch_floats(block) == 28);
+    block.head_dimension = 1;
+    assert(aabhas::inference::transformer_block_scratch_floats(block) == 0);
+    block.head_dimension = 2;
+    aabhas::inference::TransformerLayerWeights empty;
+    aabhas::inference::KvCache cache;
+    assert(cache.configure(1, 1, 2, 4, 1ULL << 20));
+    float block_output[4]{};
+    float block_scratch[28]{};
+    assert(!aabhas::inference::transformer_block_forward(
+        block, empty, 0, 0, input, 1, cache, block_output, block_scratch, 28));
     return 0;
 }

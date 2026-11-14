@@ -42,6 +42,8 @@ public:
     bool next_chunk() noexcept;
     /** Release the active mapping and its resident pages. */
     bool release() noexcept;
+    /** Restart the layer sequence after the active window has been released. */
+    bool rewind() noexcept;
 
     aabhas::tensor_ops::LayerView current() const noexcept { return streamer_.current(); }
     bool has_current() const noexcept { return current_active_; }

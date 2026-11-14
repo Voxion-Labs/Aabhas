@@ -16,71 +16,6 @@ bool multiply_checked(std::size_t lhs, std::size_t rhs, std::size_t& result) noe
 
 } // namespace
 
-bool KvCache::configure(std::size_t layer_count, std::size_t head_count,
-                        std::size_t head_dimension, std::size_t max_tokens,
-                        std::size_t max_bytes) {
-    try {
-        std::size_t width = 0;
-        std::size_t elements = 0;
-        if (layer_count == 0 || head_count == 0 || head_dimension == 0 ||
-            max_tokens == 0 || max_bytes == 0 ||
-            !multiply_checked(head_count, head_dimension, width) ||
-            !multiply_checked(layer_count, max_tokens, elements) ||
-            !multiply_checked(elements, width, elements) ||
-            !multiply_checked(elements, sizeof(float) * 2, elements) ||
-            elements > max_bytes) {
-            return false;
-        }
-        layer_count_ = layer_count;
-        token_width_ = width;
-        max_tokens_ = max_tokens;
-        keys_.assign(elements / (sizeof(float) * 2), 0.0F);
-        values_.assign(keys_.size(), 0.0F);
-        return true;
-    } catch (...) {
-        clear();
-        return false;
-    }
-}
-
-void KvCache::clear() noexcept {
-    layer_count_ = 0;
-    token_width_ = 0;
-    max_tokens_ = 0;
-    keys_.clear();
-    values_.clear();
-}
-
-std::size_t KvCache::offset(std::size_t layer, std::size_t token) const noexcept {
-    return (layer * max_tokens_ + token) * token_width_;
-}
-
-bool KvCache::append(std::size_t layer, std::size_t token,
-                     const float* key_data, const float* value_data) noexcept {
-    if (key_data == nullptr || value_data == nullptr || layer >= layer_count_ ||
-        token >= max_tokens_ || token_width_ == 0) {
-        return false;
-    }
-    const std::size_t start = offset(layer, token);
-    std::memcpy(keys_.data() + start, key_data, token_width_ * sizeof(float));
-    std::memcpy(values_.data() + start, value_data, token_width_ * sizeof(float));
-    return true;
-}
-
-const float* KvCache::key(std::size_t layer, std::size_t token) const noexcept {
-    if (layer >= layer_count_ || token >= max_tokens_ || token_width_ == 0) return nullptr;
-    return keys_.data() + offset(layer, token);
-}
-
-const float* KvCache::value(std::size_t layer, std::size_t token) const noexcept {
-    if (layer >= layer_count_ || token >= max_tokens_ || token_width_ == 0) return nullptr;
-    return values_.data() + offset(layer, token);
-}
-
-std::size_t KvCache::bytes() const noexcept {
-    return keys_.size() * sizeof(float) * 2;
-}
-
 bool InferenceRuntime::open(const char* model_path,
                             const aabhas::model::ModelIndex& model,
                             InferenceConfig config) {
@@ -88,7 +23,8 @@ bool InferenceRuntime::open(const char* model_path,
         close();
         if (model_path == nullptr || model.tensors.empty() ||
             config.scheduler.chunk_bytes == 0 ||
-            config.scheduler.chunk_bytes % sizeof(float) != 0) {
+            config.scheduler.chunk_bytes % sizeof(float) != 0 ||
+            config.max_layer_buffer_bytes == 0) {
             return false;
         }
         std::vector<aabhas::tensor_ops::LayerDescriptor> layers;
@@ -103,6 +39,7 @@ bool InferenceRuntime::open(const char* model_path,
         if (!scheduler_.open(model_path, std::move(layers), config.scheduler)) return false;
         model_ = model;
         max_kv_bytes_ = config.max_kv_bytes;
+        max_layer_buffer_bytes_ = config.max_layer_buffer_bytes;
         return true;
     } catch (...) {
         close();
@@ -116,6 +53,7 @@ void InferenceRuntime::close() noexcept {
     kv_cache_.clear();
     tokenizer_.clear();
     max_kv_bytes_ = InferenceConfig{}.max_kv_bytes;
+    max_layer_buffer_bytes_ = InferenceConfig{}.max_layer_buffer_bytes;
 }
 
 bool InferenceRuntime::configure_kv_cache(std::size_t layer_count,
@@ -188,6 +126,108 @@ bool InferenceRuntime::run_f32_matvec(std::size_t tensor_index, const float* inp
     }
     scheduler_.release();
     return complete;
+}
+
+bool InferenceRuntime::stream_f32_tensor(std::size_t tensor_index, float* destination,
+                                         std::size_t capacity_floats) noexcept {
+    if (destination == nullptr || capacity_floats == 0 ||
+        tensor_index >= model_.tensors.size() || scheduler_.has_current() ||
+        scheduler_.stats().next_layer_index != tensor_index) {
+        return false;
+    }
+    const auto& tensor = model_.tensors[tensor_index];
+    if (tensor.dtype != aabhas::model::TensorDType::F32 || tensor.shape.empty()) {
+        return false;
+    }
+    aabhas::model::TensorLayout layout;
+    if (!aabhas::model::describe_tensor_layout(tensor.dtype, tensor.shape, layout) ||
+        layout.element_count == 0 ||
+        layout.element_count > static_cast<std::uint64_t>(capacity_floats) ||
+        layout.element_count >
+            static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) ||
+        layout.byte_size > tensor.byte_size) {
+        return false;
+    }
+    const std::size_t elements = static_cast<std::size_t>(layout.element_count);
+
+    if (!scheduler_.next_layer()) return false;
+    std::size_t processed = 0;
+    while (scheduler_.has_current()) {
+        const auto view = scheduler_.current();
+        if (!view || view.size % sizeof(float) != 0) break;
+        const std::size_t values = view.size / sizeof(float);
+        if (processed > elements || values > elements - processed) break;
+        std::memcpy(destination + processed, view.data, values * sizeof(float));
+        processed += values;
+        if (processed == elements) break;
+        if (!scheduler_.next_chunk()) break;
+    }
+    scheduler_.release();
+    return processed == elements;
+}
+
+bool InferenceRuntime::load_transformer_layer(const TransformerLayerPlan& plan,
+                                              std::vector<float>& arena,
+                                              TransformerLayerWeights& weights) {
+    struct Item {
+        std::size_t tensor_index{0};
+        std::size_t offset_floats{0};
+        std::size_t float_count{0};
+    };
+    Item items[] = {
+        {plan.attention_norm.tensor_index, plan.attention_norm.offset_floats,
+         plan.attention_norm.float_count},
+        {plan.attention_query.tensor_index, plan.attention_query.offset_floats,
+         plan.attention_query.float_count},
+        {plan.attention_key.tensor_index, plan.attention_key.offset_floats,
+         plan.attention_key.float_count},
+        {plan.attention_value.tensor_index, plan.attention_value.offset_floats,
+         plan.attention_value.float_count},
+        {plan.attention_output.tensor_index, plan.attention_output.offset_floats,
+         plan.attention_output.float_count},
+        {plan.feed_forward_norm.tensor_index, plan.feed_forward_norm.offset_floats,
+         plan.feed_forward_norm.float_count},
+        {plan.feed_forward_gate.tensor_index, plan.feed_forward_gate.offset_floats,
+         plan.feed_forward_gate.float_count},
+        {plan.feed_forward_up.tensor_index, plan.feed_forward_up.offset_floats,
+         plan.feed_forward_up.float_count},
+        {plan.feed_forward_down.tensor_index, plan.feed_forward_down.offset_floats,
+         plan.feed_forward_down.float_count},
+    };
+    constexpr std::size_t item_count = sizeof(items) / sizeof(items[0]);
+    if (plan.total_floats == 0 || plan.total_floats > max_layer_buffer_bytes_ / sizeof(float)) {
+        return false;
+    }
+    try {
+        std::sort(items, items + item_count,
+                  [](const Item& lhs, const Item& rhs) {
+                      return lhs.tensor_index < rhs.tensor_index;
+                  });
+        arena.assign(plan.total_floats, 0.0F);
+    } catch (...) {
+        return false;
+    }
+    for (std::size_t index = 0; index < item_count; ++index) {
+        const Item& item = items[index];
+        if (item.float_count == 0 || item.offset_floats > plan.total_floats ||
+            item.float_count > plan.total_floats - item.offset_floats) {
+            arena.clear();
+            return false;
+        }
+        if (!stream_f32_tensor(item.tensor_index,
+                               arena.data() + item.offset_floats,
+                               item.float_count)) {
+            arena.clear();
+            scheduler_.rewind();
+            return false;
+        }
+    }
+    weights = bind_transformer_layer_plan(plan, arena.data());
+    return true;
+}
+
+bool InferenceRuntime::rewind_stream() noexcept {
+    return scheduler_.rewind();
 }
 
 } // namespace aabhas::inference

@@ -75,6 +75,18 @@ bool LayerScheduler::release() noexcept {
     return true;
 }
 
+bool LayerScheduler::rewind() noexcept {
+    if (current_active_) {
+        errno = EBUSY;
+        return false;
+    }
+    next_layer_index_ = 0;
+    stats_.next_layer_index = 0;
+    stats_.resident_bytes = 0;
+    prefetch_lookahead();
+    return true;
+}
+
 std::size_t LayerScheduler::pending_layers() const noexcept {
     return layers_.size() - std::min(next_layer_index_, layers_.size());
 }

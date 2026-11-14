@@ -72,6 +72,13 @@ marks sequential access, and applies `MADV_DONTNEED` before dropping a previous
 mapping. The kernel controls actual page residency; the hints do not promise an
 instantaneous physical-memory reclaim.
 
+The transformer execution boundary resolves GGUF or SafeTensors block tensor
+names, streams those float32 tensors through the scheduler into one bounded
+arena, and executes a complete pre-norm decoder block. Grouped-query attention,
+RoPE, residual paths, gated feed-forward layers, and a bounded KV cache share
+the same allocation-free kernel set for multi-token prefill and single-token
+decode.
+
 ### Safety grid
 
 The Rust `cdylib` exposes only `start_aabhas_engine` and

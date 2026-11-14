@@ -55,6 +55,15 @@ read-ahead without a second user-space tensor buffer. Phase 5 adds typed tensor
 metadata, a streamed F32 matrix-vector kernel, and a bounded KV-cache as the
 first compute-facing runtime boundary.
 
+The product transformer phase builds on that runtime boundary. GGUF and
+SafeTensors tensor names resolve into a checked per-layer plan, scheduled tensor
+windows are copied into a bounded float32 arena, and a complete pre-norm decoder
+block runs over that arena. The block executes multi-head grouped-query attention
+with RoPE, appends keys and values to the bounded cache, and applies the gated
+feed-forward residual path. The scheduler can rewind after a completed pass so
+the same bounded arena can serve later tokens without a second model-sized
+allocation.
+
 `NvmeDirectReader` owns a raw POSIX file descriptor. On Linux it attempts
 `O_DIRECT` and falls back to buffered `O_RDONLY` when the filesystem does not
 support direct I/O. The fallback is explicit and observable through reader
