@@ -87,10 +87,22 @@ void test_gguf(const std::filesystem::path& path) {
     bytes.insert(bytes.end(), {'G', 'G', 'U', 'F'});
     append_u32(bytes, 3);
     append_u64(bytes, 1);
-    append_u64(bytes, 1);
+    append_u64(bytes, 4);
     append_string(bytes, "general.alignment");
     append_u32(bytes, 4);
     append_u32(bytes, 32);
+    append_string(bytes, "tokenizer.ggml.tokens");
+    append_u32(bytes, 9);
+    append_u32(bytes, 8);
+    append_u64(bytes, 2);
+    append_string(bytes, "hello");
+    append_string(bytes, "world");
+    append_string(bytes, "tokenizer.ggml.bos_token_id");
+    append_u32(bytes, 4);
+    append_u32(bytes, 0);
+    append_string(bytes, "tokenizer.ggml.eos_token_id");
+    append_u32(bytes, 4);
+    append_u32(bytes, 1);
     append_string(bytes, "tensor");
     append_u32(bytes, 1);
     append_u64(bytes, 1);
@@ -110,6 +122,9 @@ void test_gguf(const std::filesystem::path& path) {
     assert(result.index.tensors[0].byte_size == 4);
     assert(result.index.tensors[0].dtype == aabhas::model::TensorDType::F32);
     assert(result.index.tensors[0].shape == std::vector<std::uint64_t>{1});
+    assert(result.index.tokenizer.vocabulary == std::vector<std::string>{"hello", "world"});
+    assert(result.index.tokenizer.bos_token_id == 0);
+    assert(result.index.tokenizer.eos_token_id == 1);
 }
 
 } // namespace

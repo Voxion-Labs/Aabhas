@@ -3,9 +3,12 @@
 
 #include "model/model_index.hpp"
 #include "scheduler/layer_scheduler.hpp"
+#include "tokenizer/tokenizer.hpp"
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace aabhas::inference {
@@ -62,6 +65,10 @@ public:
     bool configure_kv_cache(std::size_t layer_count, std::size_t head_count,
                             std::size_t head_dimension, std::size_t max_tokens);
 
+    bool configure_tokenizer(aabhas::tokenizer::TokenizerConfig config = {});
+    aabhas::tokenizer::TokenizeResult tokenize(std::string_view input) const;
+    bool detokenize(const std::vector<std::uint32_t>& tokens, std::string& output) const;
+
     KvCache& kv_cache() noexcept { return kv_cache_; }
     const KvCache& kv_cache() const noexcept { return kv_cache_; }
     const aabhas::model::ModelIndex& model() const noexcept { return model_; }
@@ -70,6 +77,7 @@ private:
     aabhas::model::ModelIndex model_;
     aabhas::scheduler::LayerScheduler scheduler_;
     KvCache kv_cache_;
+    aabhas::tokenizer::GreedyTokenizer tokenizer_;
     std::size_t max_kv_bytes_{InferenceConfig{}.max_kv_bytes};
 };
 

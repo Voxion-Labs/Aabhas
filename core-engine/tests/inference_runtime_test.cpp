@@ -1,8 +1,11 @@
 #include "inference/inference_runtime.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <vector>
 
 int main() {
     const auto path = std::filesystem::temp_directory_path() / "aabhas-inference-runtime-test.bin";
@@ -16,6 +19,8 @@ int main() {
     model.file_size = sizeof(weights);
     model.tensors.push_back({"linear", 0, sizeof(weights),
                              aabhas::model::TensorDType::F32, {2, 2}});
+    model.tokenizer.vocabulary = {"<unk>", "hello"};
+    model.tokenizer.unk_token_id = 0;
 
     aabhas::inference::InferenceRuntime runtime;
     aabhas::inference::InferenceConfig config;
@@ -37,6 +42,19 @@ int main() {
     assert(runtime.kv_cache().key(0, 2)[1] == 6.0F);
     assert(runtime.kv_cache().value(0, 2)[0] == 7.0F);
     assert(runtime.kv_cache().bytes() == 64);
+
+    aabhas::tokenizer::TokenizerConfig tokenizer_config;
+    tokenizer_config.max_input_bytes = 32;
+    tokenizer_config.max_tokens = 8;
+    assert(runtime.configure_tokenizer(tokenizer_config));
+    const auto tokenized = runtime.tokenize("hello");
+    assert(tokenized);
+    assert(tokenized.tokens.size() == 1);
+    assert(tokenized.tokens[0].id == 1);
+    std::vector<std::uint32_t> token_ids{1};
+    std::string detokenized;
+    assert(runtime.detokenize(token_ids, detokenized));
+    assert(detokenized == "hello");
 
     runtime.close();
     std::filesystem::remove(path);

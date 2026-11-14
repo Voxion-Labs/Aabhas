@@ -186,6 +186,59 @@ bool read_gguf_string(BinaryReader& reader, std::string& value) {
     return length == 0 || reader.read_bytes(value.data(), value.size());
 }
 
+bool read_gguf_string_array(BinaryReader& reader, std::vector<std::string>& values) {
+    std::uint32_t nested_type = 0;
+    std::uint64_t length = 0;
+    if (!reader.read_u32(nested_type) || !reader.read_u64(length) || nested_type != 8 ||
+        length > max_entries) {
+        return false;
+    }
+    values.clear();
+    values.reserve(static_cast<std::size_t>(length));
+    std::uint64_t total_bytes = 0;
+    for (std::uint64_t index = 0; index < length; ++index) {
+        std::string value;
+        if (!read_gguf_string(reader, value) ||
+            value.size() > max_header_bytes - std::min(total_bytes, max_header_bytes)) {
+            return false;
+        }
+        total_bytes += static_cast<std::uint64_t>(value.size());
+        values.push_back(std::move(value));
+    }
+    return true;
+}
+
+bool read_gguf_integer(BinaryReader& reader, std::uint32_t type, std::int64_t& value) {
+    if (type == 4) {
+        std::uint32_t unsigned_value = 0;
+        if (!reader.read_u32(unsigned_value)) return false;
+        value = static_cast<std::int64_t>(unsigned_value);
+        return true;
+    }
+    if (type == 5) {
+        std::uint32_t unsigned_value = 0;
+        if (!reader.read_u32(unsigned_value)) return false;
+        value = static_cast<std::int64_t>(static_cast<std::int32_t>(unsigned_value));
+        return true;
+    }
+    if (type == 10) {
+        std::uint64_t unsigned_value = 0;
+        if (!reader.read_u64(unsigned_value) ||
+            unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+            return false;
+        }
+        value = static_cast<std::int64_t>(unsigned_value);
+        return true;
+    }
+    if (type == 11) {
+        std::uint64_t unsigned_value = 0;
+        if (!reader.read_u64(unsigned_value)) return false;
+        value = static_cast<std::int64_t>(unsigned_value);
+        return true;
+    }
+    return false;
+}
+
 bool skip_gguf_value(BinaryReader& reader, std::uint32_t type,
                      std::uint64_t& alignment) {
     std::uint64_t length = 0;
@@ -260,6 +313,7 @@ IndexResult inspect_gguf(std::ifstream& stream, std::uint64_t file_size) {
     }
 
     std::uint64_t alignment = 32;
+    ModelIndex::TokenizerInfo tokenizer;
     for (std::uint64_t index = 0; index < metadata_count; ++index) {
         std::string key;
         std::uint32_t type = 0;
@@ -278,6 +332,22 @@ IndexResult inspect_gguf(std::ifstream& stream, std::uint64_t file_size) {
                 (alignment & (alignment - 1)) != 0) {
                 return {{}, IndexError::Malformed};
             }
+        } else if (key == "tokenizer.ggml.tokens" && type == 9) {
+            if (!tokenizer.vocabulary.empty() ||
+                !read_gguf_string_array(reader, tokenizer.vocabulary)) {
+                return {{}, IndexError::Malformed};
+            }
+        } else if ((key == "tokenizer.ggml.bos_token_id" ||
+                    key == "tokenizer.ggml.eos_token_id" ||
+                    key == "tokenizer.ggml.unknown_token_id") &&
+                   (type == 4 || type == 5 || type == 10 || type == 11)) {
+            std::int64_t token_id = -1;
+            if (!read_gguf_integer(reader, type, token_id) || token_id < 0) {
+                return {{}, IndexError::Malformed};
+            }
+            if (key == "tokenizer.ggml.bos_token_id") tokenizer.bos_token_id = token_id;
+            if (key == "tokenizer.ggml.eos_token_id") tokenizer.eos_token_id = token_id;
+            if (key == "tokenizer.ggml.unknown_token_id") tokenizer.unk_token_id = token_id;
         } else if (!skip_gguf_value(reader, type, alignment)) {
             return {{}, IndexError::Malformed};
         }
@@ -324,6 +394,7 @@ IndexResult inspect_gguf(std::ifstream& stream, std::uint64_t file_size) {
     ModelIndex index;
     index.format = ModelFormat::GGUF;
     index.file_size = file_size;
+    index.tokenizer = std::move(tokenizer);
     index.tensors.reserve(pending.size());
     for (std::size_t item = 0; item < pending.size(); ++item) {
         const std::uint64_t relative_offset = pending[item].offset;

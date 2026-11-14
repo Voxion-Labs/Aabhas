@@ -55,6 +55,13 @@ struct ModelIndex {
     ModelFormat format{ModelFormat::RawBinary};
     std::uint64_t file_size{0};
     std::vector<TensorDescriptor> tensors;
+
+    struct TokenizerInfo {
+        std::vector<std::string> vocabulary;
+        std::int64_t bos_token_id{-1};
+        std::int64_t eos_token_id{-1};
+        std::int64_t unk_token_id{-1};
+    } tokenizer;
 };
 
 struct IndexResult {

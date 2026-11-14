@@ -119,6 +119,10 @@ for common GGUF quantized blocks and SafeTensors scalar dtypes. Known ranges
 must match their shape-derived byte size; unsupported dtypes remain bounded
 metadata only and are never silently reinterpreted by a kernel.
 
+GGUF tokenizer vocabulary metadata is retained separately from tensor ranges.
+The tokenizer boundary validates UTF-8, applies bounded longest-match lookup,
+and returns byte spans without materializing model weights.
+
 The daemon handles SIGINT and SIGTERM, shuts down HTTP acceptance, and calls
 the native stop function on every normal exit path. Native status codes are
 translated into stable HTTP responses, including conflict, throttling, and

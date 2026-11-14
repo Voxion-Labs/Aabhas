@@ -114,6 +114,7 @@ void InferenceRuntime::close() noexcept {
     scheduler_.close();
     model_ = {};
     kv_cache_.clear();
+    tokenizer_.clear();
     max_kv_bytes_ = InferenceConfig{}.max_kv_bytes;
 }
 
@@ -123,6 +124,19 @@ bool InferenceRuntime::configure_kv_cache(std::size_t layer_count,
                                           std::size_t max_tokens) {
     return kv_cache_.configure(layer_count, head_count, head_dimension, max_tokens,
                                max_kv_bytes_);
+}
+
+bool InferenceRuntime::configure_tokenizer(aabhas::tokenizer::TokenizerConfig config) {
+    return tokenizer_.configure(model_.tokenizer, config);
+}
+
+aabhas::tokenizer::TokenizeResult InferenceRuntime::tokenize(std::string_view input) const {
+    return tokenizer_.encode(input);
+}
+
+bool InferenceRuntime::detokenize(const std::vector<std::uint32_t>& tokens,
+                                  std::string& output) const {
+    return tokenizer_.decode(tokens, output);
 }
 
 bool InferenceRuntime::run_f32_matvec(std::size_t tensor_index, const float* input,
