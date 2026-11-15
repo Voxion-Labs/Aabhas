@@ -2,6 +2,7 @@
 #define AABHAS_INFERENCE_TOKEN_GENERATOR_HPP
 
 #include "inference/kv_cache.hpp"
+#include "inference/sampler.hpp"
 #include "inference/transformer_layers.hpp"
 #include "model/model_index.hpp"
 
@@ -67,6 +68,7 @@ struct GenerationOptions {
     std::size_t max_new_tokens{128};
     bool early_stopping{true};
     float repetition_penalty{1.0F};
+    SamplerConfig sampler{};
     std::vector<std::uint32_t> stop_token_ids{};
 };
 
@@ -109,17 +111,21 @@ public:
 
     /**
      * Run prompt prefill and iterative decode steps up to options.max_new_tokens.
+     * Optionally delivers incremental chunks via stream_callback.
      */
     bool generate(const std::vector<std::uint32_t>& prompt_tokens,
                   const GenerationOptions& options,
-                  GenerationResult& result);
+                  GenerationResult& result,
+                  StreamCallback stream_callback = nullptr);
 
     /**
      * End-to-end string prompt tokenization, generation, and text detokenization.
+     * Optionally delivers incremental chunks via stream_callback.
      */
     bool generate_text(std::string_view prompt,
                        const GenerationOptions& options,
-                       GenerationResult& result);
+                       GenerationResult& result,
+                       StreamCallback stream_callback = nullptr);
 
     /**
      * Execute a forward pass for a sequence of tokens at the given start position.
@@ -136,6 +142,8 @@ public:
     std::size_t current_position() const noexcept { return current_position_; }
     const TransformerModelConfig& config() const noexcept { return config_; }
     const TransformerModelPlan& plan() const noexcept { return plan_; }
+    Sampler& sampler() noexcept { return sampler_; }
+    const Sampler& sampler() const noexcept { return sampler_; }
     bool is_initialized() const noexcept { return runtime_ != nullptr; }
 
 private:
@@ -143,6 +151,7 @@ private:
     TransformerModelPlan plan_{};
     TransformerModelConfig config_{};
     KvCache kv_cache_{};
+    Sampler sampler_{};
     std::size_t max_sequence_length_{0};
     std::size_t current_position_{0};
 

@@ -79,14 +79,16 @@ bool InferenceRuntime::configure_model(const TransformerModelConfig& config,
 
 bool InferenceRuntime::generate(const std::vector<std::uint32_t>& prompt_tokens,
                                 const GenerationOptions& options,
-                                GenerationResult& result) {
-    return generator_.generate(prompt_tokens, options, result);
+                                GenerationResult& result,
+                                StreamCallback stream_callback) {
+    return generator_.generate(prompt_tokens, options, result, std::move(stream_callback));
 }
 
 bool InferenceRuntime::generate_text(std::string_view prompt,
                                      const GenerationOptions& options,
-                                     GenerationResult& result) {
-    return generator_.generate_text(prompt, options, result);
+                                     GenerationResult& result,
+                                     StreamCallback stream_callback) {
+    return generator_.generate_text(prompt, options, result, std::move(stream_callback));
 }
 
 bool InferenceRuntime::run_matvec(std::size_t tensor_index, const float* input,

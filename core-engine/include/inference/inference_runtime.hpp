@@ -91,15 +91,17 @@ public:
     bool configure_model(const TransformerModelConfig& config,
                          std::size_t max_sequence_length = 2048);
 
-    /** Generate tokens starting from prompt token IDs. */
+    /** Generate tokens starting from prompt token IDs, optionally streaming chunks. */
     bool generate(const std::vector<std::uint32_t>& prompt_tokens,
                   const GenerationOptions& options,
-                  GenerationResult& result);
+                  GenerationResult& result,
+                  StreamCallback stream_callback = nullptr);
 
-    /** End-to-end string prompt tokenization, generation, and detokenization. */
+    /** End-to-end string prompt tokenization, generation, and detokenization, optionally streaming. */
     bool generate_text(std::string_view prompt,
                        const GenerationOptions& options,
-                       GenerationResult& result);
+                       GenerationResult& result,
+                       StreamCallback stream_callback = nullptr);
 
     TokenGenerator& generator() noexcept { return generator_; }
     const TokenGenerator& generator() const noexcept { return generator_; }

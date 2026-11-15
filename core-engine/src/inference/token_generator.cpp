@@ -53,34 +53,6 @@ bool resolve_named_tensor(const aabhas::model::ModelIndex& model,
     return true;
 }
 
-std::uint32_t argmax(const float* values, std::size_t count) noexcept {
-    if (values == nullptr || count == 0) return 0;
-    std::size_t best_idx = 0;
-    float best_val = values[0];
-    for (std::size_t i = 1; i < count; ++i) {
-        if (values[i] > best_val) {
-            best_val = values[i];
-            best_idx = i;
-        }
-    }
-    return static_cast<std::uint32_t>(best_idx);
-}
-
-void apply_repetition_penalty(float* logits, std::size_t vocab_size,
-                              const std::vector<std::uint32_t>& tokens,
-                              float penalty) noexcept {
-    if (logits == nullptr || penalty <= 1.0F || tokens.empty()) return;
-    for (const std::uint32_t token : tokens) {
-        if (token < vocab_size) {
-            if (logits[token] > 0.0F) {
-                logits[token] /= penalty;
-            } else {
-                logits[token] *= penalty;
-            }
-        }
-    }
-}
-
 } // namespace
 
 bool llama_transformer_model_naming(aabhas::model::ModelFormat format,
@@ -209,6 +181,11 @@ bool TokenGenerator::initialize(InferenceRuntime* runtime,
         return false;
     }
 
+    if (!sampler_.configure(config.vocab_size)) {
+        reset();
+        return false;
+    }
+
     try {
         block_scratch_.assign(block_scratch, 0.0F);
         logits_.assign(config.vocab_size, 0.0F);
@@ -272,6 +249,7 @@ void TokenGenerator::reset() noexcept {
     plan_ = {};
     config_ = {};
     kv_cache_.clear();
+    sampler_ = Sampler{};
     max_sequence_length_ = 0;
     current_position_ = 0;
     token_embedding_table_.clear();
@@ -356,7 +334,8 @@ bool TokenGenerator::forward_step(const std::uint32_t* tokens, std::size_t token
 
 bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
                               const GenerationOptions& options,
-                              GenerationResult& result) {
+                              GenerationResult& result,
+                              StreamCallback stream_callback) {
     if (!is_initialized() || prompt_tokens.empty() || options.max_new_tokens == 0) {
         return false;
     }
@@ -368,6 +347,31 @@ bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
     result.all_tokens = prompt_tokens;
     result.reached_eos = false;
 
+    SamplerConfig sampler_cfg = options.sampler;
+    if (options.repetition_penalty > 1.0F && sampler_cfg.repetition_penalty == 1.0F) {
+        sampler_cfg.repetition_penalty = options.repetition_penalty;
+    }
+
+    auto emit_chunk = [&](std::uint32_t token_id, bool is_eos) -> bool {
+        if (!stream_callback) return true;
+        StreamChunk chunk;
+        chunk.token_id = token_id;
+        chunk.token_index = result.generated_tokens.size() - 1;
+        chunk.is_eos = is_eos;
+        if (runtime_->tokenizer().configured()) {
+            std::string current_full_text;
+            runtime_->detokenize(result.generated_tokens, current_full_text);
+            if (current_full_text.size() >= result.text.size()) {
+                chunk.text_delta = current_full_text.substr(result.text.size());
+                result.text = std::move(current_full_text);
+            } else {
+                chunk.text_delta = current_full_text;
+                result.text = std::move(current_full_text);
+            }
+        }
+        return stream_callback(chunk);
+    };
+
     // Reset KV-cache sequence tracking for new generation session
     kv_cache_.reset_sequence();
     current_position_ = 0;
@@ -378,9 +382,8 @@ bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
     }
     current_position_ = prompt_tokens.size();
 
-    apply_repetition_penalty(logits_.data(), config_.vocab_size, result.all_tokens,
-                             options.repetition_penalty);
-    std::uint32_t next_token = argmax(logits_.data(), config_.vocab_size);
+    std::uint32_t next_token = sampler_.sample(logits_.data(), config_.vocab_size,
+                                               result.all_tokens, sampler_cfg);
 
     if (config_.eos_token_id >= 0 &&
         next_token == static_cast<std::uint32_t>(config_.eos_token_id)) {
@@ -396,9 +399,14 @@ bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
     result.generated_tokens.push_back(next_token);
     result.all_tokens.push_back(next_token);
 
+    if (!emit_chunk(next_token, result.reached_eos)) {
+        result.generated_token_count = result.generated_tokens.size();
+        return true;
+    }
+
     if (result.reached_eos && options.early_stopping) {
         result.generated_token_count = result.generated_tokens.size();
-        if (runtime_->tokenizer().configured()) {
+        if (runtime_->tokenizer().configured() && result.text.empty()) {
             runtime_->detokenize(result.generated_tokens, result.text);
         }
         return true;
@@ -413,9 +421,8 @@ bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
         }
         current_position_ += 1;
 
-        apply_repetition_penalty(logits_.data(), config_.vocab_size,
-                                 result.all_tokens, options.repetition_penalty);
-        next_token = argmax(logits_.data(), config_.vocab_size);
+        next_token = sampler_.sample(logits_.data(), config_.vocab_size,
+                                     result.all_tokens, sampler_cfg);
 
         if (config_.eos_token_id >= 0 &&
             next_token == static_cast<std::uint32_t>(config_.eos_token_id)) {
@@ -431,13 +438,17 @@ bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
         result.generated_tokens.push_back(next_token);
         result.all_tokens.push_back(next_token);
 
+        if (!emit_chunk(next_token, result.reached_eos)) {
+            break;
+        }
+
         if (result.reached_eos && options.early_stopping) {
             break;
         }
     }
 
     result.generated_token_count = result.generated_tokens.size();
-    if (runtime_->tokenizer().configured()) {
+    if (runtime_->tokenizer().configured() && result.text.empty() && !result.generated_tokens.empty()) {
         runtime_->detokenize(result.generated_tokens, result.text);
     }
     return true;
@@ -445,7 +456,8 @@ bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
 
 bool TokenGenerator::generate_text(std::string_view prompt,
                                    const GenerationOptions& options,
-                                   GenerationResult& result) {
+                                   GenerationResult& result,
+                                   StreamCallback stream_callback) {
     if (!is_initialized() || runtime_ == nullptr) return false;
     const auto tokenized = runtime_->tokenize(prompt);
     if (!tokenized || tokenized.tokens.empty()) return false;
@@ -459,7 +471,7 @@ bool TokenGenerator::generate_text(std::string_view prompt,
         prompt_tokens.push_back(tok.id);
     }
 
-    return generate(prompt_tokens, options, result);
+    return generate(prompt_tokens, options, result, std::move(stream_callback));
 }
 
 } // namespace aabhas::inference
