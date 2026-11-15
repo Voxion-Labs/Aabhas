@@ -164,17 +164,17 @@ void test_batch_scheduler_multi_sequence() {
     BatchRequest req1;
     req1.prompt_tokens = {3}; // "alpha"
     req1.options.max_new_tokens = 2;
-    req1.options.early_stopping = true;
+    req1.options.early_stopping = false;
 
     BatchRequest req2;
     req2.prompt_tokens = {3, 4}; // "alpha", "beta"
     req2.options.max_new_tokens = 3;
-    req2.options.early_stopping = true;
+    req2.options.early_stopping = false;
 
     BatchRequest req3;
     req3.prompt_tokens = {4, 5, 6}; // "beta", "gamma", "delta"
     req3.options.max_new_tokens = 2;
-    req3.options.early_stopping = true;
+    req3.options.early_stopping = false;
 
     const std::uint64_t id1 = scheduler.enqueue(std::move(req1));
     const std::uint64_t id2 = scheduler.enqueue(std::move(req2));
@@ -382,8 +382,11 @@ void test_runtime_generate_batch_api() {
     std::vector<std::vector<std::uint32_t>> prompts = {{3}, {3, 4}, {4}};
     std::vector<GenerationOptions> opts(3);
     opts[0].max_new_tokens = 2;
+    opts[0].early_stopping = false;
     opts[1].max_new_tokens = 3;
+    opts[1].early_stopping = false;
     opts[2].max_new_tokens = 1;
+    opts[2].early_stopping = false;
 
     std::vector<GenerationResult> batch_results;
     assert(runtime.generate_batch(prompts, opts, batch_results));

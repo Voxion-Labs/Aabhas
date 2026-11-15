@@ -229,16 +229,11 @@ bool BatchScheduler::step(BatchStepMetrics& metrics) {
         return true;
     }
 
-    // 2. Step prefilling sequences
+    // 2. Step prefilling or decoding sequences (one token per sequence per step)
     for (auto& seq : active_sequences_) {
         if (seq.status == SequenceStatus::Prefilling) {
             step_sequence_prefill(seq, metrics);
-        }
-    }
-
-    // 3. Step decoding sequences
-    for (auto& seq : active_sequences_) {
-        if (seq.status == SequenceStatus::Decoding) {
+        } else if (seq.status == SequenceStatus::Decoding) {
             step_sequence_decode(seq, metrics);
         }
     }
