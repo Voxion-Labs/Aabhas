@@ -2,6 +2,7 @@
 #define AABHAS_INFERENCE_INFERENCE_RUNTIME_HPP
 
 #include "inference/kv_cache.hpp"
+#include "inference/token_generator.hpp"
 #include "inference/transformer_layers.hpp"
 #include "model/model_index.hpp"
 #include "scheduler/layer_scheduler.hpp"
@@ -83,15 +84,34 @@ public:
     aabhas::tokenizer::TokenizeResult tokenize(std::string_view input) const;
     bool detokenize(const std::vector<std::uint32_t>& tokens, std::string& output) const;
 
+    /** Configure full model architecture and generator for autoregressive generation. */
+    bool configure_model(const TransformerModelConfig& config,
+                         std::size_t max_sequence_length = 2048);
+
+    /** Generate tokens starting from prompt token IDs. */
+    bool generate(const std::vector<std::uint32_t>& prompt_tokens,
+                  const GenerationOptions& options,
+                  GenerationResult& result);
+
+    /** End-to-end string prompt tokenization, generation, and detokenization. */
+    bool generate_text(std::string_view prompt,
+                       const GenerationOptions& options,
+                       GenerationResult& result);
+
+    TokenGenerator& generator() noexcept { return generator_; }
+    const TokenGenerator& generator() const noexcept { return generator_; }
     KvCache& kv_cache() noexcept { return kv_cache_; }
     const KvCache& kv_cache() const noexcept { return kv_cache_; }
     const aabhas::model::ModelIndex& model() const noexcept { return model_; }
+    const aabhas::tokenizer::GreedyTokenizer& tokenizer() const noexcept { return tokenizer_; }
+    std::size_t max_kv_bytes() const noexcept { return max_kv_bytes_; }
 
 private:
     aabhas::model::ModelIndex model_;
     aabhas::scheduler::LayerScheduler scheduler_;
     KvCache kv_cache_;
     aabhas::tokenizer::GreedyTokenizer tokenizer_;
+    TokenGenerator generator_;
     std::size_t max_kv_bytes_{InferenceConfig{}.max_kv_bytes};
     std::size_t max_layer_buffer_bytes_{InferenceConfig{}.max_layer_buffer_bytes};
 };

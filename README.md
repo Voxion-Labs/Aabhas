@@ -84,6 +84,12 @@ Quantized CPU kernels execute directly on GGML block formats (`Q4_0`, `Q4_1`,
 providing bounded scalar conversion, direct dot-product accumulation, and
 streaming dequantization across arbitrary scheduler chunk windows.
 
+The autoregressive token generation engine builds on top of this layer and
+bounded KV-cache foundation. It executes multi-token prompt prefill and
+single-token decode loops with zero heap allocation per iteration, managing
+sequence tracking, layer forwarding, final RMSNorm, LM head logit projection,
+and greedy token selection with early EOS stopping.
+
 ### Safety grid
 
 The Rust `cdylib` exposes only `start_aabhas_engine` and

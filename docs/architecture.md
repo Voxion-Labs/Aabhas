@@ -71,6 +71,14 @@ directly into the layer arena without full-model materialization, while direct
 `vec_dot` and `gemv_quantized` allow matrix-vector evaluation with zero heap
 allocations.
 
+Token generation orchestrates the full model execution graph. `TokenGenerator`
+pre-allocates all execution buffers and KV-cache storage upfront, preloads static
+embeddings and output normalization tables, and executes batched prompt prefill
+and iterative decode loops without memory allocations in the loop. The cache
+provides sequence tracking, layer-wide contiguous views, and prefix rollback,
+while greedy logit selection with repetition penalty provides deterministic
+token generation.
+
 `NvmeDirectReader` owns a raw POSIX file descriptor. On Linux it attempts
 `O_DIRECT` and falls back to buffered `O_RDONLY` when the filesystem does not
 support direct I/O. The fallback is explicit and observable through reader

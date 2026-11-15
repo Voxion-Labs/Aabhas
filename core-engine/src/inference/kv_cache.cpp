@@ -16,7 +16,7 @@ bool multiply_checked(std::size_t lhs, std::size_t rhs, std::size_t& result) noe
 
 bool KvCache::configure(std::size_t layer_count, std::size_t head_count,
                         std::size_t head_dimension, std::size_t max_tokens,
-                        std::size_t max_bytes) {
+                        std::size_t max_bytes, KvCacheDType dtype) {
     try {
         std::size_t width = 0;
         std::size_t elements = 0;
@@ -30,8 +30,12 @@ bool KvCache::configure(std::size_t layer_count, std::size_t head_count,
             return false;
         }
         layer_count_ = layer_count;
+        head_count_ = head_count;
+        head_dimension_ = head_dimension;
         token_width_ = width;
         max_tokens_ = max_tokens;
+        sequence_length_ = 0;
+        dtype_ = dtype;
         keys_.assign(elements / (sizeof(float) * 2), 0.0F);
         values_.assign(keys_.size(), 0.0F);
         return true;
@@ -43,8 +47,12 @@ bool KvCache::configure(std::size_t layer_count, std::size_t head_count,
 
 void KvCache::clear() noexcept {
     layer_count_ = 0;
+    head_count_ = 0;
+    head_dimension_ = 0;
     token_width_ = 0;
     max_tokens_ = 0;
+    sequence_length_ = 0;
+    dtype_ = KvCacheDType::F32;
     keys_.clear();
     values_.clear();
 }
@@ -62,17 +70,60 @@ bool KvCache::append(std::size_t layer, std::size_t token,
     const std::size_t start = offset(layer, token);
     std::memcpy(keys_.data() + start, key_data, token_width_ * sizeof(float));
     std::memcpy(values_.data() + start, value_data, token_width_ * sizeof(float));
+    if (token + 1 > sequence_length_) {
+        sequence_length_ = token + 1;
+    }
+    return true;
+}
+
+bool KvCache::append_sequence(std::size_t layer, std::size_t start_token,
+                              std::size_t token_count,
+                              const float* key_data, const float* value_data) noexcept {
+    if (key_data == nullptr || value_data == nullptr || layer >= layer_count_ ||
+        token_count == 0 || token_width_ == 0) {
+        return false;
+    }
+    if (start_token >= max_tokens_ || token_count > max_tokens_ - start_token) {
+        return false;
+    }
+    const std::size_t start = offset(layer, start_token);
+    const std::size_t float_count = token_count * token_width_;
+    std::memcpy(keys_.data() + start, key_data, float_count * sizeof(float));
+    std::memcpy(values_.data() + start, value_data, float_count * sizeof(float));
+    if (start_token + token_count > sequence_length_) {
+        sequence_length_ = start_token + token_count;
+    }
     return true;
 }
 
 const float* KvCache::key(std::size_t layer, std::size_t token) const noexcept {
-    if (layer >= layer_count_ || token >= max_tokens_ || token_width_ == 0) return nullptr;
+    if (layer >= layer_count_ || token >= max_tokens_ || token_width_ == 0 || keys_.empty()) {
+        return nullptr;
+    }
     return keys_.data() + offset(layer, token);
 }
 
 const float* KvCache::value(std::size_t layer, std::size_t token) const noexcept {
-    if (layer >= layer_count_ || token >= max_tokens_ || token_width_ == 0) return nullptr;
+    if (layer >= layer_count_ || token >= max_tokens_ || token_width_ == 0 || values_.empty()) {
+        return nullptr;
+    }
     return values_.data() + offset(layer, token);
+}
+
+const float* KvCache::layer_keys(std::size_t layer) const noexcept {
+    if (layer >= layer_count_ || token_width_ == 0 || keys_.empty()) return nullptr;
+    return keys_.data() + offset(layer, 0);
+}
+
+const float* KvCache::layer_values(std::size_t layer) const noexcept {
+    if (layer >= layer_count_ || token_width_ == 0 || values_.empty()) return nullptr;
+    return values_.data() + offset(layer, 0);
+}
+
+bool KvCache::truncate(std::size_t new_length) noexcept {
+    if (new_length > max_tokens_) return false;
+    sequence_length_ = new_length;
+    return true;
 }
 
 std::size_t KvCache::bytes() const noexcept {

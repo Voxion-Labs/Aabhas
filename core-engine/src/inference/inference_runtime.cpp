@@ -47,6 +47,7 @@ bool InferenceRuntime::open(const char* model_path,
 }
 
 void InferenceRuntime::close() noexcept {
+    generator_.reset();
     scheduler_.close();
     model_ = {};
     kv_cache_.clear();
@@ -74,6 +75,27 @@ aabhas::tokenizer::TokenizeResult InferenceRuntime::tokenize(std::string_view in
 bool InferenceRuntime::detokenize(const std::vector<std::uint32_t>& tokens,
                                   std::string& output) const {
     return tokenizer_.decode(tokens, output);
+}
+
+bool InferenceRuntime::configure_model(const TransformerModelConfig& config,
+                                       std::size_t max_sequence_length) {
+    TransformerModelPlan plan;
+    if (!build_transformer_model_plan(model_, model_.format, config, plan)) {
+        return false;
+    }
+    return generator_.initialize(this, plan, config, max_sequence_length);
+}
+
+bool InferenceRuntime::generate(const std::vector<std::uint32_t>& prompt_tokens,
+                                const GenerationOptions& options,
+                                GenerationResult& result) {
+    return generator_.generate(prompt_tokens, options, result);
+}
+
+bool InferenceRuntime::generate_text(std::string_view prompt,
+                                     const GenerationOptions& options,
+                                     GenerationResult& result) {
+    return generator_.generate_text(prompt, options, result);
 }
 
 bool InferenceRuntime::run_matvec(std::size_t tensor_index, const float* input,
