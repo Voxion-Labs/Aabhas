@@ -100,6 +100,12 @@ public:
                   GenerationResult& result,
                   StreamCallback stream_callback = nullptr);
 
+    /** Generate tokens in batch across multiple prompt token sequences concurrently. */
+    bool generate_batch(const std::vector<std::vector<std::uint32_t>>& prompt_batch,
+                        const std::vector<GenerationOptions>& options_batch,
+                        std::vector<GenerationResult>& results_batch,
+                        std::vector<StreamCallback> stream_callbacks = {});
+
     /** End-to-end string prompt tokenization, generation, and detokenization, optionally streaming. */
     bool generate_text(std::string_view prompt,
                        const GenerationOptions& options,

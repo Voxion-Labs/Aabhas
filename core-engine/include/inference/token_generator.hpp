@@ -119,6 +119,15 @@ public:
                   StreamCallback stream_callback = nullptr);
 
     /**
+     * Batch generation across multiple prompt token sequences concurrently.
+     * Evaluates prompts and steps decodes across all sequences in parallel.
+     */
+    bool generate_batch(const std::vector<std::vector<std::uint32_t>>& prompt_batch,
+                        const std::vector<GenerationOptions>& options_batch,
+                        std::vector<GenerationResult>& results_batch,
+                        std::vector<StreamCallback> stream_callbacks = {});
+
+    /**
      * End-to-end string prompt tokenization, generation, and text detokenization.
      * Optionally delivers incremental chunks via stream_callback.
      */
@@ -128,11 +137,20 @@ public:
                        StreamCallback stream_callback = nullptr);
 
     /**
-     * Execute a forward pass for a sequence of tokens at the given start position.
+     * Execute a forward pass for a sequence of tokens at the given start position using
+     * the generator's internal KV-cache.
      * Computes logits for the final token in the slice into `logits_out` ([vocab_size]).
      */
     bool forward_step(const std::uint32_t* tokens, std::size_t token_count,
                       std::size_t start_position, float* logits_out);
+
+    /**
+     * Execute a forward pass for a sequence of tokens with an explicit caller-supplied KV-cache.
+     * Enables multi-sequence execution and dynamic batching without mutating internal generator KV-cache.
+     */
+    bool forward_step(const std::uint32_t* tokens, std::size_t token_count,
+                      std::size_t start_position, float* logits_out,
+                      KvCache& kv_cache);
 
     /** Clear KV-cache and reset current sequence position to 0. */
     void reset() noexcept;

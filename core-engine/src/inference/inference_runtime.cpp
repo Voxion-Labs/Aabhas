@@ -95,6 +95,15 @@ bool InferenceRuntime::generate(const std::vector<std::uint32_t>& prompt_tokens,
     return generator_.generate(prompt_tokens, options, result, std::move(stream_callback));
 }
 
+bool InferenceRuntime::generate_batch(
+    const std::vector<std::vector<std::uint32_t>>& prompt_batch,
+    const std::vector<GenerationOptions>& options_batch,
+    std::vector<GenerationResult>& results_batch,
+    std::vector<StreamCallback> stream_callbacks) {
+    return generator_.generate_batch(prompt_batch, options_batch, results_batch,
+                                     std::move(stream_callbacks));
+}
+
 bool InferenceRuntime::generate_text(std::string_view prompt,
                                      const GenerationOptions& options,
                                      GenerationResult& result,

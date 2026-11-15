@@ -1,4 +1,5 @@
 #include "inference/token_generator.hpp"
+#include "inference/batch_scheduler.hpp"
 #include "inference/inference_runtime.hpp"
 #include "inference/quantized_kernels.hpp"
 
@@ -273,6 +274,12 @@ void TokenGenerator::reset() noexcept {
 
 bool TokenGenerator::forward_step(const std::uint32_t* tokens, std::size_t token_count,
                                   std::size_t start_position, float* logits_out) {
+    return forward_step(tokens, token_count, start_position, logits_out, kv_cache_);
+}
+
+bool TokenGenerator::forward_step(const std::uint32_t* tokens, std::size_t token_count,
+                                  std::size_t start_position, float* logits_out,
+                                  KvCache& kv_cache) {
     if (!is_initialized() || tokens == nullptr || token_count == 0 ||
         logits_out == nullptr) {
         return false;
@@ -298,7 +305,7 @@ bool TokenGenerator::forward_step(const std::uint32_t* tokens, std::size_t token
         if (runtime_->gpu_backend().is_layer_offloaded(l)) {
             if (!runtime_->gpu_backend().execute_layer_forward(
                     l, config_.block, start_position, hidden_states_.data(),
-                    token_count, kv_cache_, hidden_scratch_.data())) {
+                    token_count, kv_cache, hidden_scratch_.data())) {
                 return false;
             }
         } else {
@@ -316,7 +323,7 @@ bool TokenGenerator::forward_step(const std::uint32_t* tokens, std::size_t token
 
             if (!transformer_block_forward(
                     config_.block, weights, l, start_position, hidden_states_.data(),
-                    token_count, kv_cache_, hidden_scratch_.data(),
+                    token_count, kv_cache, hidden_scratch_.data(),
                     block_scratch_.data(), block_scratch_.size())) {
                 return false;
             }
@@ -468,6 +475,29 @@ bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
         runtime_->detokenize(result.generated_tokens, result.text);
     }
     return true;
+}
+
+bool TokenGenerator::generate_batch(
+    const std::vector<std::vector<std::uint32_t>>& prompt_batch,
+    const std::vector<GenerationOptions>& options_batch,
+    std::vector<GenerationResult>& results_batch,
+    std::vector<StreamCallback> stream_callbacks) {
+    if (!is_initialized() || prompt_batch.empty() ||
+        prompt_batch.size() != options_batch.size()) {
+        return false;
+    }
+    BatchSchedulerConfig sched_cfg;
+    sched_cfg.max_batch_size = std::max<std::size_t>(prompt_batch.size(), 16);
+    sched_cfg.max_sequence_length = max_sequence_length_;
+    sched_cfg.max_queue_depth = prompt_batch.size() + 16;
+
+    BatchScheduler scheduler(sched_cfg);
+    if (!scheduler.initialize(runtime_, config_)) {
+        return false;
+    }
+    results_batch = scheduler.generate_batch(prompt_batch, options_batch,
+                                             std::move(stream_callbacks));
+    return results_batch.size() == prompt_batch.size();
 }
 
 bool TokenGenerator::generate_text(std::string_view prompt,
