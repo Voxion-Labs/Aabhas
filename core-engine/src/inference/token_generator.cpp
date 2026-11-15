@@ -239,6 +239,9 @@ bool TokenGenerator::initialize(InferenceRuntime* runtime,
                 layer_weight_arenas_.clear();
                 break;
             }
+            if (runtime->gpu_backend().is_layer_offloaded(i)) {
+                (void)runtime->gpu_backend().upload_layer_weights(i, weights, plan.layers[i]);
+            }
         }
     } catch (...) {
         weights_cached_ = false;
@@ -292,23 +295,31 @@ bool TokenGenerator::forward_step(const std::uint32_t* tokens, std::size_t token
 
     // 2. Transformer block forward through every layer
     for (std::size_t l = 0; l < config_.layer_count; ++l) {
-        TransformerLayerWeights weights;
-        if (weights_cached_) {
-            weights = bind_transformer_layer_plan(plan_.layers[l],
-                                                  layer_weight_arenas_[l].data());
-        } else {
-            runtime_->seek_stream(plan_.layers[l].attention_norm.tensor_index);
-            if (!runtime_->load_transformer_layer(plan_.layers[l], layer_arena_,
-                                                  weights)) {
+        if (runtime_->gpu_backend().is_layer_offloaded(l)) {
+            if (!runtime_->gpu_backend().execute_layer_forward(
+                    l, config_.block, start_position, hidden_states_.data(),
+                    token_count, kv_cache_, hidden_scratch_.data())) {
                 return false;
             }
-        }
+        } else {
+            TransformerLayerWeights weights;
+            if (weights_cached_) {
+                weights = bind_transformer_layer_plan(plan_.layers[l],
+                                                      layer_weight_arenas_[l].data());
+            } else {
+                runtime_->seek_stream(plan_.layers[l].attention_norm.tensor_index);
+                if (!runtime_->load_transformer_layer(plan_.layers[l], layer_arena_,
+                                                      weights)) {
+                    return false;
+                }
+            }
 
-        if (!transformer_block_forward(
-                config_.block, weights, l, start_position, hidden_states_.data(),
-                token_count, kv_cache_, hidden_scratch_.data(),
-                block_scratch_.data(), block_scratch_.size())) {
-            return false;
+            if (!transformer_block_forward(
+                    config_.block, weights, l, start_position, hidden_states_.data(),
+                    token_count, kv_cache_, hidden_scratch_.data(),
+                    block_scratch_.data(), block_scratch_.size())) {
+                return false;
+            }
         }
 
         // Copy layer output hidden states back to active buffer

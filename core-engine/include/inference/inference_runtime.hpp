@@ -1,6 +1,7 @@
 #ifndef AABHAS_INFERENCE_INFERENCE_RUNTIME_HPP
 #define AABHAS_INFERENCE_INFERENCE_RUNTIME_HPP
 
+#include "inference/gpu_backend.hpp"
 #include "inference/kv_cache.hpp"
 #include "inference/token_generator.hpp"
 #include "inference/transformer_layers.hpp"
@@ -20,6 +21,7 @@ struct InferenceConfig {
     aabhas::scheduler::SchedulerConfig scheduler{};
     std::size_t max_kv_bytes{256ULL * 1024ULL * 1024ULL};
     std::size_t max_layer_buffer_bytes{512ULL * 1024ULL * 1024ULL};
+    GpuConfig gpu{};
 };
 
 /** Executes bounded CPU kernels over tensor windows supplied by the scheduler. */
@@ -84,6 +86,7 @@ public:
                             std::size_t head_dimension, std::size_t max_tokens);
 
     bool configure_tokenizer(aabhas::tokenizer::TokenizerConfig config = {});
+    bool configure_gpu(const GpuConfig& config);
     aabhas::tokenizer::TokenizeResult tokenize(std::string_view input) const;
     bool detokenize(const std::vector<std::uint32_t>& tokens, std::string& output) const;
 
@@ -105,6 +108,8 @@ public:
 
     TokenGenerator& generator() noexcept { return generator_; }
     const TokenGenerator& generator() const noexcept { return generator_; }
+    GpuBackend& gpu_backend() noexcept { return gpu_backend_; }
+    const GpuBackend& gpu_backend() const noexcept { return gpu_backend_; }
     KvCache& kv_cache() noexcept { return kv_cache_; }
     const KvCache& kv_cache() const noexcept { return kv_cache_; }
     const aabhas::model::ModelIndex& model() const noexcept { return model_; }
@@ -116,6 +121,7 @@ private:
     aabhas::scheduler::LayerScheduler scheduler_;
     KvCache kv_cache_;
     aabhas::tokenizer::GreedyTokenizer tokenizer_;
+    GpuBackend gpu_backend_{};
     TokenGenerator generator_;
     std::size_t max_kv_bytes_{InferenceConfig{}.max_kv_bytes};
     std::size_t max_layer_buffer_bytes_{InferenceConfig{}.max_layer_buffer_bytes};

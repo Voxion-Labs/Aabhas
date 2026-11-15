@@ -15,10 +15,13 @@ add_library(aabhas_data_plane STATIC
     src/inference/quantized_kernels.cpp
     src/inference/token_generator.cpp
     src/inference/sampler.cpp
+    src/inference/vram_allocator.cpp
+    src/inference/gpu_backend.cpp
     src/scheduler/layer_scheduler.cpp
     src/hardware/nvme_direct.cpp
     src/hardware/nvme_streamer.cpp
     src/hardware/hw_identifier.cpp
+    src/hardware/gpu_device.cpp
     src/engine/native_engine.cpp
     src/tensor_ops/layer_streamer.cpp
 )
@@ -51,6 +54,7 @@ if (AABHAS_BUILD_TESTS)
     add_executable(aabhas_quantized_kernels_test tests/quantized_kernels_test.cpp)
     add_executable(aabhas_token_generator_test tests/token_generator_test.cpp)
     add_executable(aabhas_sampling_test tests/sampling_test.cpp)
+    add_executable(aabhas_gpu_backend_test tests/gpu_backend_test.cpp)
     target_compile_features(aabhas_model_index_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_layer_scheduler_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_inference_runtime_test PRIVATE cxx_std_17)
@@ -60,6 +64,7 @@ if (AABHAS_BUILD_TESTS)
     target_compile_features(aabhas_quantized_kernels_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_token_generator_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_sampling_test PRIVATE cxx_std_17)
+    target_compile_features(aabhas_gpu_backend_test PRIVATE cxx_std_17)
     target_link_libraries(aabhas_model_index_test PRIVATE
         aabhas_data_plane
         Threads::Threads
@@ -96,6 +101,10 @@ if (AABHAS_BUILD_TESTS)
         aabhas_data_plane
         Threads::Threads
     )
+    target_link_libraries(aabhas_gpu_backend_test PRIVATE
+        aabhas_data_plane
+        Threads::Threads
+    )
     add_test(NAME aabhas_model_index_test COMMAND aabhas_model_index_test)
     add_test(NAME aabhas_layer_scheduler_test COMMAND aabhas_layer_scheduler_test)
     add_test(NAME aabhas_inference_runtime_test COMMAND aabhas_inference_runtime_test)
@@ -105,4 +114,5 @@ if (AABHAS_BUILD_TESTS)
     add_test(NAME aabhas_quantized_kernels_test COMMAND aabhas_quantized_kernels_test)
     add_test(NAME aabhas_token_generator_test COMMAND aabhas_token_generator_test)
     add_test(NAME aabhas_sampling_test COMMAND aabhas_sampling_test)
+    add_test(NAME aabhas_gpu_backend_test COMMAND aabhas_gpu_backend_test)
 endif()

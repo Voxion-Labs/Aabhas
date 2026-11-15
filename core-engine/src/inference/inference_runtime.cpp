@@ -27,6 +27,12 @@ bool InferenceRuntime::open(const char* model_path,
             layers.push_back({tensor.file_offset, static_cast<std::size_t>(tensor.byte_size)});
         }
         if (!scheduler_.open(model_path, std::move(layers), config.scheduler)) return false;
+        if (config.gpu.gpu_layers > 0) {
+            if (!gpu_backend_.initialize(config.gpu)) {
+                close();
+                return false;
+            }
+        }
         model_ = model;
         max_kv_bytes_ = config.max_kv_bytes;
         max_layer_buffer_bytes_ = config.max_layer_buffer_bytes;
@@ -39,6 +45,7 @@ bool InferenceRuntime::open(const char* model_path,
 
 void InferenceRuntime::close() noexcept {
     generator_.reset();
+    gpu_backend_.shutdown();
     scheduler_.close();
     model_ = {};
     kv_cache_.clear();
@@ -57,6 +64,10 @@ bool InferenceRuntime::configure_kv_cache(std::size_t layer_count,
 
 bool InferenceRuntime::configure_tokenizer(aabhas::tokenizer::TokenizerConfig config) {
     return tokenizer_.configure(model_.tokenizer, config);
+}
+
+bool InferenceRuntime::configure_gpu(const GpuConfig& config) {
+    return gpu_backend_.initialize(config);
 }
 
 aabhas::tokenizer::TokenizeResult InferenceRuntime::tokenize(std::string_view input) const {
