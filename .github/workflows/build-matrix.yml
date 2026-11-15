@@ -14,11 +14,17 @@ jobs:
   build-and-audit:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout The Matrix
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        run: |
+          git init .
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --depth 1 origin "${{ github.ref }}"
+          git checkout --detach FETCH_HEAD
 
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Build C++ data plane
         run: |
@@ -29,9 +35,19 @@ jobs:
         working-directory: core-engine
 
       - name: Setup Go Environment
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
+        run: |
+          if ! command -v go >/dev/null 2>&1; then
+            if [ -d "/opt/hostedtoolcache/go" ]; then
+              CACHED_GO=$(find /opt/hostedtoolcache/go -type f -name go | head -n 1)
+              if [ -n "$CACHED_GO" ]; then
+                echo "$(dirname "$CACHED_GO")" >> $GITHUB_PATH
+              fi
+            fi
+          fi
+          if ! command -v go >/dev/null 2>&1; then
+            curl -fsSL https://go.dev/dl/go1.22.8.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+            echo "/usr/local/go/bin" >> $GITHUB_PATH
+          fi
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked

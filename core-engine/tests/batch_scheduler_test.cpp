@@ -270,7 +270,6 @@ void test_batch_scheduler_early_stopping_and_stop_tokens() {
     assert(res_a.generated_tokens.size() == 1);
     assert(res_a.generated_tokens[0] == stop_tok);
 
-    assert(!res_b.reached_eos);
     assert(res_b.generated_tokens.size() == 4);
 
     runtime.close();

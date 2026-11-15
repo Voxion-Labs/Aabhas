@@ -13,11 +13,17 @@ jobs:
   cargo-audit:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout The Matrix
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        run: |
+          git init .
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --depth 1 origin "${{ github.ref }}"
+          git checkout --detach FETCH_HEAD
 
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked

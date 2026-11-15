@@ -11,7 +11,7 @@ ARG RUST_TOOLCHAIN=1.85.1
 
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
-    PATH=/root/.cargo/bin:/usr/local/go/bin:${PATH} \
+    PATH=/usr/local/cargo/bin:/root/.cargo/bin:/usr/local/go/bin:${PATH} \
     CGO_ENABLED=1
 
 RUN apt-get update \

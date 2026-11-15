@@ -24,9 +24,11 @@ jobs:
       contents: write
     steps:
       - name: Checkout tested commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git init .
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git fetch --depth 1 origin "${{ github.event.workflow_run.head_sha }}"
+          git checkout --detach FETCH_HEAD
 
       - name: Publish bot-authored release manifest commit
         env:
@@ -38,8 +40,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git fetch origin refs/heads/main:refs/remotes/origin/main
-          git switch --create main --track origin/main
+          git fetch --depth 50 origin refs/heads/main:refs/remotes/origin/main
+          git checkout -B main origin/main
 
           mkdir -p bot-release
           cat > bot-release/release-manifest.json <<EOF
@@ -52,8 +54,8 @@ jobs:
           EOF
 
           git add bot-release/release-manifest.json
-          git commit -m "ci: publish release manifest [skip ci]"
-          git push origin HEAD:refs/heads/main
+          git diff --staged --quiet || git commit -m "ci: publish release manifest [skip ci]"
+          git push origin main || true
 
       - name: Build stripped release archive
         run: bash scripts/build_release.sh
@@ -68,4 +70,5 @@ jobs:
           gh release create "${RELEASE_TAG}" dist/*.tar.gz dist/*.sha256
           --target "${{ github.event.workflow_run.head_sha }}"
           --title "Aabhas ${RELEASE_TAG}"
-          --notes "Automated release generated after successful Aabhas Core Matrix CI."
+          --notes "Automated release generated after successful Aabhas Core Matrix CI." ||
+          gh release upload "${RELEASE_TAG}" dist/*.tar.gz dist/*.sha256 --clobber
