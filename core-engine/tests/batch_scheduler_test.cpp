@@ -126,6 +126,19 @@ void test_batch_scheduler_empty_and_idle() {
     assert(scheduler.step(metrics));
     assert(metrics.active_sequences == 0);
     assert(metrics.tokens_generated_in_step == 0);
+
+    auto ctx = create_synthetic_model("test_batch_sched_idle.bin");
+    InferenceRuntime runtime;
+    assert(runtime.open(ctx.path.string().c_str(), ctx.model_index));
+    assert(runtime.configure_model(ctx.model_config, 32));
+    assert(scheduler.initialize(&runtime, ctx.model_config));
+
+    assert(scheduler.is_idle());
+    assert(scheduler.step(metrics));
+    assert(metrics.active_sequences == 0);
+
+    runtime.close();
+    std::filesystem::remove(ctx.path);
 }
 
 void test_batch_scheduler_multi_sequence() {

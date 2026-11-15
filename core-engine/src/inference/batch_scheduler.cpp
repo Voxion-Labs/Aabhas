@@ -186,6 +186,9 @@ bool BatchScheduler::step_sequence_decode(BatchSequenceState& seq, BatchStepMetr
 
 bool BatchScheduler::step(BatchStepMetrics& metrics) {
     metrics = {};
+    if (active_sequences_.empty() && pending_requests_.empty()) {
+        return true;
+    }
     if (runtime_ == nullptr) return false;
 
     // 1. Admit new requests up to available batch slots
