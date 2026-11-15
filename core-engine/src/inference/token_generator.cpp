@@ -204,9 +204,11 @@ bool TokenGenerator::initialize(InferenceRuntime* runtime,
     }
 
     // Stream and dequantize embedding and normalization tables
-    if (!runtime->stream_tensor(plan.token_embedding.tensor_index,
+    if (!runtime->seek_stream(plan.token_embedding.tensor_index) ||
+        !runtime->stream_tensor(plan.token_embedding.tensor_index,
                                 token_embedding_table_.data(),
                                 token_embedding_table_.size()) ||
+        !runtime->seek_stream(plan.output_norm.tensor_index) ||
         !runtime->stream_tensor(plan.output_norm.tensor_index,
                                 output_norm_table_.data(),
                                 output_norm_table_.size())) {
@@ -215,7 +217,8 @@ bool TokenGenerator::initialize(InferenceRuntime* runtime,
     }
 
     if (!plan.lm_head_tied_to_embedding) {
-        if (!runtime->stream_tensor(plan.lm_head.tensor_index,
+        if (!runtime->seek_stream(plan.lm_head.tensor_index) ||
+            !runtime->stream_tensor(plan.lm_head.tensor_index,
                                     lm_head_table_.data(),
                                     lm_head_table_.size())) {
             reset();
@@ -229,7 +232,8 @@ bool TokenGenerator::initialize(InferenceRuntime* runtime,
         weights_cached_ = true;
         for (std::size_t i = 0; i < config.layer_count; ++i) {
             TransformerLayerWeights weights;
-            if (!runtime->load_transformer_layer(plan.layers[i],
+            if (!runtime->seek_stream(plan.layers[i].attention_norm.tensor_index) ||
+                !runtime->load_transformer_layer(plan.layers[i],
                                                  layer_weight_arenas_[i], weights)) {
                 weights_cached_ = false;
                 layer_weight_arenas_.clear();
@@ -293,6 +297,7 @@ bool TokenGenerator::forward_step(const std::uint32_t* tokens, std::size_t token
             weights = bind_transformer_layer_plan(plan_.layers[l],
                                                   layer_weight_arenas_[l].data());
         } else {
+            runtime_->seek_stream(plan_.layers[l].attention_norm.tensor_index);
             if (!runtime_->load_transformer_layer(plan_.layers[l], layer_arena_,
                                                   weights)) {
                 return false;

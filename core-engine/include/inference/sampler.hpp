@@ -15,7 +15,7 @@ namespace aabhas::inference {
  * Stochastic and greedy sampling configuration.
  */
 struct SamplerConfig {
-    float temperature{1.0F};        // <= 1.0e-4F activates greedy argmax
+    float temperature{0.0F};        // <= 1.0e-4F activates greedy argmax
     std::size_t top_k{0};           // 0 = disabled; > 0 keeps top K logits
     float top_p{1.0F};              // 1.0F = disabled; (0.0F, 1.0F) nucleus threshold
     float min_p{0.0F};              // 0.0F = disabled; (0.0F, 1.0F) min relative probability
