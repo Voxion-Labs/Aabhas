@@ -43,9 +43,14 @@ public:
     ~Sampler() noexcept = default;
     Sampler(const Sampler&) = delete;
     Sampler& operator=(const Sampler&) = delete;
+    Sampler(Sampler&&) noexcept = default;
+    Sampler& operator=(Sampler&&) noexcept = default;
 
     /** Pre-allocate internal candidate and probability buffers for vocab_size. */
     bool configure(std::size_t vocab_size);
+
+    /** Reset internal state and buffers. */
+    void reset() noexcept;
 
     /** Set or re-seed the pseudo-random generator. */
     void set_seed(std::uint64_t seed) noexcept;

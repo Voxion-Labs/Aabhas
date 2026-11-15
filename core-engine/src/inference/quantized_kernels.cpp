@@ -225,7 +225,6 @@ bool dequantize_row(aabhas::model::TensorDType dtype,
     const std::size_t required_bytes = num_blocks * bytes_per_blk;
     if (source_bytes < required_bytes) return false;
 
-    const std::uint8_t* src_ptr = static_cast<const std::uint8_t*>(source);
     switch (dtype) {
     case aabhas::model::TensorDType::F32:
         std::memcpy(destination, source, element_count * sizeof(float));

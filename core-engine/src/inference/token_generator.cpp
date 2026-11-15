@@ -249,7 +249,7 @@ void TokenGenerator::reset() noexcept {
     plan_ = {};
     config_ = {};
     kv_cache_.clear();
-    sampler_ = Sampler{};
+    sampler_.reset();
     max_sequence_length_ = 0;
     current_position_ = 0;
     token_embedding_table_.clear();

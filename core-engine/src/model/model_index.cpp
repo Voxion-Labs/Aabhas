@@ -735,7 +735,7 @@ IndexResult inspect(const char* model_path) {
     ModelIndex raw;
     raw.format = ModelFormat::RawBinary;
     raw.file_size = file_size;
-    raw.tensors.push_back({"raw_model", 0, file_size});
+    raw.tensors.push_back({"raw_model", 0, file_size, TensorDType::Unknown, {}});
     return {std::move(raw), IndexError::None};
 }
 

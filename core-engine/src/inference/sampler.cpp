@@ -26,6 +26,14 @@ bool Sampler::configure(std::size_t vocab_size) {
     }
 }
 
+void Sampler::reset() noexcept {
+    vocab_size_ = 0;
+    candidates_.clear();
+    probs_.clear();
+    token_counts_.clear();
+    rng_.seed(1337ULL);
+}
+
 void Sampler::set_seed(std::uint64_t seed) noexcept {
     rng_.seed(seed);
 }
