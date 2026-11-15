@@ -226,12 +226,27 @@ void test_batch_scheduler_early_stopping_and_stop_tokens() {
     BatchScheduler scheduler(BatchSchedulerConfig{4, 16, 32});
     assert(scheduler.initialize(&runtime, ctx.model_config));
 
-    // Request A stops on first generated token (4)
+    // Probe the first token produced for prompt {3}
+    BatchRequest probe_req;
+    probe_req.prompt_tokens = {3};
+    probe_req.options.max_new_tokens = 1;
+    probe_req.options.early_stopping = false;
+    const std::uint64_t probe_id = scheduler.enqueue(std::move(probe_req));
+    BatchStepMetrics probe_metrics;
+    while (!scheduler.is_idle()) {
+        assert(scheduler.step(probe_metrics));
+    }
+    GenerationResult probe_res;
+    assert(scheduler.get_result(probe_id, probe_res));
+    assert(probe_res.generated_tokens.size() == 1);
+    const std::uint32_t stop_tok = probe_res.generated_tokens[0];
+
+    // Request A stops on stop_tok
     BatchRequest req_a;
-    req_a.prompt_tokens = {3}; // "alpha" -> next is 4 ("beta")
+    req_a.prompt_tokens = {3};
     req_a.options.max_new_tokens = 10;
     req_a.options.early_stopping = true;
-    req_a.options.stop_token_ids = {4};
+    req_a.options.stop_token_ids = {stop_tok};
 
     // Request B has no stop token and early_stopping disabled, generates 4 tokens
     BatchRequest req_b;
@@ -253,7 +268,7 @@ void test_batch_scheduler_early_stopping_and_stop_tokens() {
 
     assert(res_a.reached_eos);
     assert(res_a.generated_tokens.size() == 1);
-    assert(res_a.generated_tokens[0] == 4);
+    assert(res_a.generated_tokens[0] == stop_tok);
 
     assert(!res_b.reached_eos);
     assert(res_b.generated_tokens.size() == 4);
