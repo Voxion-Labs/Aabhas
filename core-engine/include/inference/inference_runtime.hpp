@@ -75,6 +75,9 @@ public:
     /** Reset the scheduler sequence so the model can be streamed again. */
     bool rewind_stream() noexcept;
 
+    /** Seek the scheduler sequence to a specific tensor index. */
+    bool seek_stream(std::size_t tensor_index) noexcept;
+
     /** Configure the bounded cache. `head_count` must be the number of cached
      *  key/value heads; grouped-query models pass their kv head count. */
     bool configure_kv_cache(std::size_t layer_count, std::size_t head_count,

@@ -398,7 +398,7 @@ bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
 
     if (result.reached_eos && options.early_stopping) {
         result.generated_token_count = result.generated_tokens.size();
-        if (runtime_->tokenizer().vocabulary().size() > 0) {
+        if (runtime_->tokenizer().configured()) {
             runtime_->detokenize(result.generated_tokens, result.text);
         }
         return true;
@@ -437,7 +437,7 @@ bool TokenGenerator::generate(const std::vector<std::uint32_t>& prompt_tokens,
     }
 
     result.generated_token_count = result.generated_tokens.size();
-    if (runtime_->tokenizer().vocabulary().size() > 0) {
+    if (runtime_->tokenizer().configured()) {
         runtime_->detokenize(result.generated_tokens, result.text);
     }
     return true;

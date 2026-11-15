@@ -6,15 +6,6 @@
 #include <utility>
 
 namespace aabhas::inference {
-namespace {
-
-bool multiply_checked(std::size_t lhs, std::size_t rhs, std::size_t& result) noexcept {
-    if (lhs != 0 && rhs > std::numeric_limits<std::size_t>::max() / lhs) return false;
-    result = lhs * rhs;
-    return true;
-}
-
-} // namespace
 
 bool InferenceRuntime::open(const char* model_path,
                             const aabhas::model::ModelIndex& model,
@@ -102,9 +93,11 @@ bool InferenceRuntime::run_matvec(std::size_t tensor_index, const float* input,
                                   std::size_t input_size, float* output,
                                   std::size_t output_size) noexcept {
     if (input == nullptr || output == nullptr || tensor_index >= model_.tensors.size() ||
-        scheduler_.has_current() ||
-        scheduler_.stats().next_layer_index != tensor_index) {
+        scheduler_.has_current()) {
         return false;
+    }
+    if (scheduler_.stats().next_layer_index != tensor_index) {
+        if (!scheduler_.seek(tensor_index)) return false;
     }
     const auto& tensor = model_.tensors[tensor_index];
     if (!kernels::is_supported_weight_dtype(tensor.dtype) || tensor.shape.size() != 2) {
@@ -179,9 +172,11 @@ bool InferenceRuntime::run_f32_matvec(std::size_t tensor_index, const float* inp
 bool InferenceRuntime::stream_tensor(std::size_t tensor_index, float* destination,
                                      std::size_t capacity_floats) noexcept {
     if (destination == nullptr || capacity_floats == 0 ||
-        tensor_index >= model_.tensors.size() || scheduler_.has_current() ||
-        scheduler_.stats().next_layer_index != tensor_index) {
+        tensor_index >= model_.tensors.size() || scheduler_.has_current()) {
         return false;
+    }
+    if (scheduler_.stats().next_layer_index != tensor_index) {
+        if (!scheduler_.seek(tensor_index)) return false;
     }
     const auto& tensor = model_.tensors[tensor_index];
     if (!kernels::is_supported_weight_dtype(tensor.dtype) || tensor.shape.empty()) {
@@ -288,6 +283,10 @@ bool InferenceRuntime::load_transformer_layer(const TransformerLayerPlan& plan,
 
 bool InferenceRuntime::rewind_stream() noexcept {
     return scheduler_.rewind();
+}
+
+bool InferenceRuntime::seek_stream(std::size_t tensor_index) noexcept {
+    return scheduler_.seek(tensor_index);
 }
 
 } // namespace aabhas::inference

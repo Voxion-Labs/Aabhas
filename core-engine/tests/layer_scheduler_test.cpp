@@ -36,6 +36,14 @@ int main() {
     assert(scheduler.release());
     assert(!scheduler.next_layer());
 
+    assert(scheduler.seek(1));
+    assert(scheduler.next_layer());
+    assert(scheduler.current().size == 4);
+    assert(scheduler.release());
+    assert(scheduler.seek(0));
+    assert(scheduler.next_layer());
+    assert(scheduler.release());
+
     scheduler.close();
     std::filesystem::remove(path);
     return 0;

@@ -236,9 +236,9 @@ void test_end_to_end_token_generation() {
     assert(runtime.configure_model(model_cfg, 32));
 
     // Test forward_step for single prompt token
-    float logits[vocab] = {0};
+    std::vector<float> logits(vocab, 0.0F);
     const std::uint32_t prompt_token = 3; // "alpha"
-    assert(runtime.generator().forward_step(&prompt_token, 1, 0, logits));
+    assert(runtime.generator().forward_step(&prompt_token, 1, 0, logits.data()));
     for (std::size_t i = 0; i < vocab; ++i) {
         assert(std::isfinite(logits[i]));
     }

@@ -44,6 +44,8 @@ public:
     bool release() noexcept;
     /** Restart the layer sequence after the active window has been released. */
     bool rewind() noexcept;
+    /** Seek to an arbitrary layer index after the active window has been released. */
+    bool seek(std::size_t layer_index) noexcept;
 
     aabhas::tensor_ops::LayerView current() const noexcept { return streamer_.current(); }
     bool has_current() const noexcept { return current_active_; }

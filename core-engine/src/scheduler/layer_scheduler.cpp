@@ -87,6 +87,22 @@ bool LayerScheduler::rewind() noexcept {
     return true;
 }
 
+bool LayerScheduler::seek(std::size_t layer_index) noexcept {
+    if (current_active_) {
+        errno = EBUSY;
+        return false;
+    }
+    if (layer_index > layers_.size()) {
+        errno = ENOENT;
+        return false;
+    }
+    next_layer_index_ = layer_index;
+    stats_.next_layer_index = layer_index;
+    stats_.resident_bytes = 0;
+    prefetch_lookahead();
+    return true;
+}
+
 std::size_t LayerScheduler::pending_layers() const noexcept {
     return layers_.size() - std::min(next_layer_index_, layers_.size());
 }
