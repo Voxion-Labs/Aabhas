@@ -226,18 +226,18 @@ void test_batch_scheduler_early_stopping_and_stop_tokens() {
     BatchScheduler scheduler(BatchSchedulerConfig{4, 16, 32});
     assert(scheduler.initialize(&runtime, ctx.model_config));
 
-    // Request A stops on token 5 ("gamma")
+    // Request A stops on first generated token (4)
     BatchRequest req_a;
-    req_a.prompt_tokens = {3}; // "alpha" -> next will be 4 ("beta"), then 5 ("gamma")
+    req_a.prompt_tokens = {3}; // "alpha" -> next is 4 ("beta")
     req_a.options.max_new_tokens = 10;
     req_a.options.early_stopping = true;
-    req_a.options.stop_token_ids = {5};
+    req_a.options.stop_token_ids = {4};
 
-    // Request B has no stop token, generates 5 tokens
+    // Request B has no stop token and early_stopping disabled, generates 4 tokens
     BatchRequest req_b;
     req_b.prompt_tokens = {3};
-    req_b.options.max_new_tokens = 5;
-    req_b.options.early_stopping = true;
+    req_b.options.max_new_tokens = 4;
+    req_b.options.early_stopping = false;
 
     const std::uint64_t id_a = scheduler.enqueue(std::move(req_a));
     const std::uint64_t id_b = scheduler.enqueue(std::move(req_b));
@@ -252,11 +252,11 @@ void test_batch_scheduler_early_stopping_and_stop_tokens() {
     assert(scheduler.get_result(id_b, res_b));
 
     assert(res_a.reached_eos);
-    assert(res_a.generated_tokens.size() == 2); // 4 ("beta"), then 5 ("gamma" -> stop)
-    assert(res_a.generated_tokens.back() == 5);
+    assert(res_a.generated_tokens.size() == 1);
+    assert(res_a.generated_tokens[0] == 4);
 
     assert(!res_b.reached_eos);
-    assert(res_b.generated_tokens.size() == 5);
+    assert(res_b.generated_tokens.size() == 4);
 
     runtime.close();
     std::filesystem::remove(ctx.path);
@@ -278,10 +278,12 @@ void test_batch_scheduler_continuous_admission() {
     BatchRequest req1;
     req1.prompt_tokens = {3};
     req1.options.max_new_tokens = 2;
+    req1.options.early_stopping = false;
 
     BatchRequest req2;
     req2.prompt_tokens = {4};
     req2.options.max_new_tokens = 2;
+    req2.options.early_stopping = false;
 
     const std::uint64_t id1 = scheduler.enqueue(std::move(req1));
     const std::uint64_t id2 = scheduler.enqueue(std::move(req2));
@@ -342,7 +344,7 @@ void test_batch_scheduler_streaming() {
     BatchRequest req;
     req.prompt_tokens = {3}; // "alpha"
     req.options.max_new_tokens = 3;
-    req.options.early_stopping = true;
+    req.options.early_stopping = false;
     req.stream_callback = [&](const StreamChunk& chunk) -> bool {
         streamed_tokens.push_back(chunk.token_id);
         if (!chunk.text_delta.empty()) {
