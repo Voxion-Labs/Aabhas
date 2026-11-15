@@ -72,10 +72,10 @@ ModelPool::~ModelPool() noexcept {
 
 std::size_t ModelPool::compute_estimated_host_bytes(const ModelRegistration& reg) const noexcept {
     if (reg.estimated_host_bytes > 0) return reg.estimated_host_bytes;
-    std::size_t bytes = reg.model_index.file_size;
+    std::size_t bytes = static_cast<std::size_t>(reg.model_index.file_size);
     if (bytes == 0) {
         for (const auto& t : reg.model_index.tensors) {
-            bytes += t.size_bytes;
+            bytes += static_cast<std::size_t>(t.byte_size);
         }
     }
     bytes += reg.inference_config.max_kv_bytes;
@@ -90,7 +90,7 @@ std::size_t ModelPool::compute_estimated_vram_bytes(const ModelRegistration& reg
     if (reg.model_config.layer_count > 0) {
         std::size_t total_weight_bytes = 0;
         for (const auto& t : reg.model_index.tensors) {
-            total_weight_bytes += t.size_bytes;
+            total_weight_bytes += static_cast<std::size_t>(t.byte_size);
         }
         const std::size_t offloaded = std::min(reg.inference_config.gpu.gpu_layers,
                                               reg.model_config.layer_count);
