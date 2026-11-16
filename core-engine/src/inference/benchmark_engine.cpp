@@ -108,7 +108,7 @@ std::vector<KernelBenchmarkResult> BenchmarkEngine::benchmark_kernels(
         res.latency_us = (duration_ms * 1000.0) / static_cast<double>(iterations);
         const double flops = 2.0 * static_cast<double>(dim) * static_cast<double>(iterations);
         res.gflops = (flops / 1e9) / (duration_ms / 1000.0);
-        const double bytes = (dim * sizeof(std::uint16_t) + dim * sizeof(float)) * static_cast<double>(iterations);
+        const double bytes = static_cast<double>(dim * sizeof(std::uint16_t) + dim * sizeof(float)) * static_cast<double>(iterations);
         res.gigabytes_per_sec = (bytes / 1e9) / (duration_ms / 1000.0);
         results.push_back(res);
     }
@@ -149,7 +149,7 @@ std::vector<KernelBenchmarkResult> BenchmarkEngine::benchmark_kernels(
         res.latency_us = (duration_ms * 1000.0) / static_cast<double>(iterations);
         const double flops = 2.0 * static_cast<double>(dim) * static_cast<double>(iterations);
         res.gflops = (flops / 1e9) / (duration_ms / 1000.0);
-        const double bytes = (num_blocks * sizeof(kernels::BlockQ4_0) + dim * sizeof(float)) * static_cast<double>(iterations);
+        const double bytes = static_cast<double>(num_blocks * sizeof(kernels::BlockQ4_0) + dim * sizeof(float)) * static_cast<double>(iterations);
         res.gigabytes_per_sec = (bytes / 1e9) / (duration_ms / 1000.0);
         results.push_back(res);
     }
@@ -191,7 +191,7 @@ std::vector<KernelBenchmarkResult> BenchmarkEngine::benchmark_kernels(
         res.latency_us = (duration_ms * 1000.0) / static_cast<double>(iterations);
         const double flops = 2.0 * static_cast<double>(dim) * static_cast<double>(iterations);
         res.gflops = (flops / 1e9) / (duration_ms / 1000.0);
-        const double bytes = (num_blocks * sizeof(kernels::BlockQ4_1) + dim * sizeof(float)) * static_cast<double>(iterations);
+        const double bytes = static_cast<double>(num_blocks * sizeof(kernels::BlockQ4_1) + dim * sizeof(float)) * static_cast<double>(iterations);
         res.gigabytes_per_sec = (bytes / 1e9) / (duration_ms / 1000.0);
         results.push_back(res);
     }
@@ -232,7 +232,7 @@ std::vector<KernelBenchmarkResult> BenchmarkEngine::benchmark_kernels(
         res.latency_us = (duration_ms * 1000.0) / static_cast<double>(iterations);
         const double flops = 2.0 * static_cast<double>(dim) * static_cast<double>(iterations);
         res.gflops = (flops / 1e9) / (duration_ms / 1000.0);
-        const double bytes = (num_blocks * sizeof(kernels::BlockQ8_0) + dim * sizeof(float)) * static_cast<double>(iterations);
+        const double bytes = static_cast<double>(num_blocks * sizeof(kernels::BlockQ8_0) + dim * sizeof(float)) * static_cast<double>(iterations);
         res.gigabytes_per_sec = (bytes / 1e9) / (duration_ms / 1000.0);
         results.push_back(res);
     }
@@ -268,7 +268,7 @@ MemoryBenchmarkResult BenchmarkEngine::benchmark_memory(
         const auto end = std::chrono::high_resolution_clock::now();
         const double duration_s = std::chrono::duration<double>(end - start).count();
         // 2x bytes per copy (read src + write dst)
-        res.copy_bandwidth_gbps = (static_cast<double>(bytes * 2 * iters) / 1e9) / std::max(duration_s, 1e-6);
+        res.copy_bandwidth_gbps = (2.0 * static_cast<double>(bytes) * static_cast<double>(iters) / 1e9) / std::max(duration_s, 1e-6);
     }
 
     // Sequential Read Bandwidth
@@ -287,7 +287,7 @@ MemoryBenchmarkResult BenchmarkEngine::benchmark_memory(
         const double duration_s = std::chrono::duration<double>(end - start).count();
         if (sum == 12345678ULL) dst[0] = static_cast<std::uint8_t>(sum);
 
-        res.sequential_read_gbps = (static_cast<double>(bytes * iters) / 1e9) / std::max(duration_s, 1e-6);
+        res.sequential_read_gbps = (static_cast<double>(bytes) * static_cast<double>(iters) / 1e9) / std::max(duration_s, 1e-6);
     }
 
     // Sequential Write Bandwidth
@@ -304,7 +304,7 @@ MemoryBenchmarkResult BenchmarkEngine::benchmark_memory(
         const auto end = std::chrono::high_resolution_clock::now();
         const double duration_s = std::chrono::duration<double>(end - start).count();
 
-        res.sequential_write_gbps = (static_cast<double>(bytes * iters) / 1e9) / std::max(duration_s, 1e-6);
+        res.sequential_write_gbps = (static_cast<double>(bytes) * static_cast<double>(iters) / 1e9) / std::max(duration_s, 1e-6);
     }
 
     return res;
@@ -387,7 +387,7 @@ DecodeBenchmarkResult BenchmarkEngine::benchmark_decode(
         step_times.reserve(gen_tokens);
         auto last_time = std::chrono::high_resolution_clock::now();
 
-        options.stream_callback = [&](std::uint32_t, std::string_view, bool) -> bool {
+        StreamCallback stream_callback = [&](const StreamChunk&) -> bool {
             const auto now = std::chrono::high_resolution_clock::now();
             const double delta = std::chrono::duration<double, std::milli>(now - last_time).count();
             step_times.push_back(delta);
@@ -398,7 +398,7 @@ DecodeBenchmarkResult BenchmarkEngine::benchmark_decode(
         GenerationResult run_res{};
         const auto run_start = std::chrono::high_resolution_clock::now();
         last_time = run_start;
-        runtime.generate(prompt, options, run_res);
+        runtime.generate(prompt, options, run_res, stream_callback);
         const auto run_end = std::chrono::high_resolution_clock::now();
         const double duration = std::chrono::duration<double, std::milli>(run_end - run_start).count();
         total_ms += duration;
@@ -553,7 +553,7 @@ std::string BenchmarkSuiteReport::summary_table() const {
     oss << "================================================================================\n";
     oss << "System:       " << hardware.host.system << " (" << hardware.host.logical_cpu_count << " cores)\n";
     oss << "CPU Flags:    " << hardware.cpu.to_string() << "\n";
-    oss << "Host Memory:  " << (hardware.host.physical_memory_bytes / (1024 * 1024)) << " MiB physical\n";
+    oss << "Host Memory:  " << (hardware.host.physical_memory_bytes / (1024ULL * 1024ULL)) << " MiB physical\n";
     oss << "Accelerator:  " << hardware.primary_gpu().name << " (" << hardware.primary_gpu().vendor << ")\n";
     oss << "--------------------------------------------------------------------------------\n";
     oss << "MEMORY BANDWIDTH\n";

@@ -52,6 +52,7 @@ public:
     std::size_t layer_count() const noexcept { return layers_.size(); }
     std::size_t pending_layers() const noexcept;
     SchedulerStats stats() const noexcept { return stats_; }
+    bool is_open() const noexcept { return streamer_.is_open(); }
 
 private:
     void prefetch_lookahead() noexcept;

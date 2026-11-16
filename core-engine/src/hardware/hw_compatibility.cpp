@@ -376,7 +376,7 @@ CompatibilityAssessment HardwareCompatibilityEvaluator::evaluate(
 
     // Minimum RAM required when streaming out-of-core from NVMe:
     // RAM must hold KV cache + active layer window (~10% of weights) + activation scratchpad
-    const std::uint64_t layer_window_ram = std::max(estimate.weight_bytes / 8ULL, 32ULL * 1024ULL * 1024ULL);
+    const std::uint64_t layer_window_ram = std::max<std::uint64_t>(estimate.weight_bytes / 8ULL, 32ULL * 1024ULL * 1024ULL);
     const std::uint64_t min_streamed_ram_required = total_kv_bytes + layer_window_ram + estimate.activation_scratch_bytes;
 
     // 1. Tier: Full GPU
@@ -385,7 +385,7 @@ CompatibilityAssessment HardwareCompatibilityEvaluator::evaluate(
         result.recommended_tier = ExecutionTier::FullGpu;
         result.primary_bottleneck = BottleneckType::None;
         result.compatibility_score = 95;
-        result.max_recommended_batch_size = std::max<std::size_t>(1, static_cast<std::size_t>(vram_bytes / std::max(1ULL, estimate.weight_bytes + estimate.activation_scratch_bytes)));
+        result.max_recommended_batch_size = std::max<std::size_t>(1, static_cast<std::size_t>(vram_bytes / std::max<std::uint64_t>(1, estimate.weight_bytes + estimate.activation_scratch_bytes)));
         result.max_recommended_context_length = static_cast<std::size_t>(target_ctx);
         result.diagnostics.emplace_back("Model fits entirely within accelerator VRAM for maximum throughput.");
         return result;
@@ -409,7 +409,7 @@ CompatibilityAssessment HardwareCompatibilityEvaluator::evaluate(
         result.recommended_tier = ExecutionTier::CpuRam;
         result.primary_bottleneck = profile_.cpu.avx2 ? BottleneckType::HostBandwidth : BottleneckType::CpuVectorWidth;
         result.compatibility_score = profile_.cpu.avx512f ? 85 : (profile_.cpu.avx2 ? 75 : 55);
-        result.max_recommended_batch_size = std::max<std::size_t>(1, static_cast<std::size_t>((host_avail_ram - estimate.weight_bytes) / std::max(1ULL, estimate.kv_cache_bytes_at_context(target_ctx))));
+        result.max_recommended_batch_size = std::max<std::size_t>(1, static_cast<std::size_t>((host_avail_ram - estimate.weight_bytes) / std::max<std::uint64_t>(1, estimate.kv_cache_bytes_at_context(target_ctx))));
         result.max_recommended_context_length = static_cast<std::size_t>(target_ctx);
 
         if (profile_.cpu.avx512_vnni) {
@@ -451,9 +451,9 @@ CompatibilityAssessment HardwareCompatibilityEvaluator::evaluate(
     result.max_recommended_context_length = 0;
 
     std::ostringstream err;
-    err << "Insufficient system RAM (" << (host_avail_ram / (1024 * 1024))
+    err << "Insufficient system RAM (" << (host_avail_ram / (1024ULL * 1024ULL))
         << " MiB available) and storage for model resource footprint ("
-        << (estimate.weight_bytes / (1024 * 1024)) << " MiB weights).";
+        << (estimate.weight_bytes / (1024ULL * 1024ULL)) << " MiB weights).";
     result.diagnostics.push_back(err.str());
     return result;
 }

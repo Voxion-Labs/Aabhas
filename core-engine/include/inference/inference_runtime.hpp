@@ -35,6 +35,7 @@ public:
     bool open(const char* model_path, const aabhas::model::ModelIndex& model,
               InferenceConfig config = {});
     void close() noexcept;
+    bool is_open() const noexcept { return scheduler_.is_open(); }
 
     /** Run one streamed row-major matrix-vector tensor (supports F32, F16, BF16, and quantized types). */
     bool run_matvec(std::size_t tensor_index, const float* input,
