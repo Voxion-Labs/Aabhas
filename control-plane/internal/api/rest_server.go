@@ -16,7 +16,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Voxion-Labs/Aabhas/control-plane/internal/auth"
 	"github.com/Voxion-Labs/Aabhas/control-plane/internal/cgo_bridge"
+	"github.com/Voxion-Labs/Aabhas/control-plane/internal/license"
 	"github.com/Voxion-Labs/Aabhas/control-plane/internal/observability"
 	"github.com/Voxion-Labs/Aabhas/control-plane/internal/orchestrator"
 )
@@ -50,6 +52,54 @@ type modelsResponse struct {
 	Models []orchestrator.ModelRecord `json:"models"`
 }
 
+type tokenGenerateRequest struct {
+	Name       string    `json:"name"`
+	Role       auth.Role `json:"role"`
+	TTLSeconds int64     `json:"ttl_seconds,omitempty"`
+}
+
+type tokenRevokeRequest struct {
+	TokenID string `json:"token_id"`
+}
+
+type tokenResponse struct {
+	Token  string            `json:"token,omitempty"`
+	Record *auth.TokenRecord `json:"record,omitempty"`
+}
+
+type tokenListResponse struct {
+	Tokens []auth.TokenRecord `json:"tokens"`
+}
+
+type licenseVerifyRequest struct {
+	License            license.SignedLicense `json:"license"`
+	TargetHardwareUUID string                `json:"target_hardware_uuid,omitempty"`
+}
+
+type licenseVerifyResponse struct {
+	Valid          bool   `json:"valid"`
+	CustomerName   string `json:"customer_name,omitempty"`
+	Tier           string `json:"tier,omitempty"`
+	HardwareBound  string `json:"hardware_bound,omitempty"`
+	ExpirationDate string `json:"expiration_date,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+type modelVerifyRequest struct {
+	ModelPath      string `json:"model_path"`
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
+}
+
+type modelVerifyResponse struct {
+	Valid          bool   `json:"valid"`
+	ModelPath      string `json:"model_path"`
+	ComputedSHA256 string `json:"computed_sha256"`
+	FileSizeBytes  int64  `json:"file_size_bytes"`
+	Error          string `json:"error,omitempty"`
+}
+
+type identityContextKey struct{}
+
 // Server owns the HTTP server and its engine lifecycle handlers.
 type Server struct {
 	httpServer  *http.Server
@@ -57,6 +107,7 @@ type Server struct {
 	controller  *orchestrator.ExecutionController
 	registry    *orchestrator.ModelRegistry
 	metrics     *observability.Metrics
+	tokens      *auth.TokenManager
 	lifecycleMu sync.Mutex
 	requestSeq  atomic.Uint64
 }
@@ -72,20 +123,28 @@ func NewServer(addr string, logger *log.Logger) *Server {
 		controller: orchestrator.NewExecutionController(),
 		registry:   orchestrator.NewModelRegistry(),
 		metrics:    observability.NewMetrics(),
+		tokens:     auth.NewTokenManager(),
 	}
+	if envToken := strings.TrimSpace(os.Getenv("AABHAS_API_TOKEN")); envToken != "" {
+		_ = server.tokens.RegisterStaticAdminToken(envToken, "env-admin")
+	}
+
 	protectedMux := http.NewServeMux()
-	protectedMux.HandleFunc("/api/v1/engine/start", server.handleStart)
-	protectedMux.HandleFunc("/api/v1/engine/stop", server.handleStop)
-	protectedMux.HandleFunc("/api/v1/engine/status", server.handleStatus)
-	protectedMux.HandleFunc("/api/v1/models", server.handleModels)
-	protectedMux.HandleFunc("/api/v1/hardware/compatibility", server.handleHardwareCompatibility)
-	protectedMux.HandleFunc("/api/v1/benchmark", server.handleBenchmark)
-	protectedMux.HandleFunc("/metrics", server.handleMetrics)
+	protectedMux.HandleFunc("/api/v1/engine/start", server.requireRole(auth.RoleAdmin, server.handleStart))
+	protectedMux.HandleFunc("/api/v1/engine/stop", server.requireRole(auth.RoleAdmin, server.handleStop))
+	protectedMux.HandleFunc("/api/v1/engine/status", server.requireRole(auth.RoleAuditor, server.handleStatus))
+	protectedMux.HandleFunc("/api/v1/models", server.requireRole(auth.RoleInference, server.handleModels))
+	protectedMux.HandleFunc("/api/v1/hardware/compatibility", server.requireRole(auth.RoleOperator, server.handleHardwareCompatibility))
+	protectedMux.HandleFunc("/api/v1/benchmark", server.requireRole(auth.RoleOperator, server.handleBenchmark))
+	protectedMux.HandleFunc("/api/v1/auth/tokens", server.requireRole(auth.RoleAdmin, server.handleTokens))
+	protectedMux.HandleFunc("/api/v1/license/verify", server.requireRole(auth.RoleOperator, server.handleLicenseVerify))
+	protectedMux.HandleFunc("/api/v1/models/verify", server.requireRole(auth.RoleOperator, server.handleModelVerify))
+	protectedMux.HandleFunc("/metrics", server.requireRole(auth.RoleAuditor, server.handleMetrics))
 
 	publicMux := http.NewServeMux()
 	publicMux.HandleFunc("/healthz", server.handleHealth)
 	publicMux.HandleFunc("/readyz", server.handleReady)
-	protected := requireBearerToken(protectedMux, os.Getenv("AABHAS_API_TOKEN"))
+	protected := server.authenticate(protectedMux)
 	rootHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/healthz", "/readyz":
@@ -143,22 +202,66 @@ func (s *Server) instrument(next http.Handler) http.Handler {
 	})
 }
 
-func requireBearerToken(next http.Handler, configured string) http.Handler {
-	token := strings.TrimSpace(configured)
-	if token == "" {
-		return next
-	}
+func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		const prefix = "Bearer "
-		authorization := r.Header.Get("Authorization")
-		if len(authorization) <= len(prefix) || !strings.EqualFold(authorization[:len(prefix)], prefix) ||
-			subtle.ConstantTimeCompare([]byte(authorization[len(prefix):]), []byte(token)) != 1 {
+		// If no tokens configured, development mode allows all requests
+		if len(s.tokens.ListTokens()) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		rawToken := extractBearerOrKey(r)
+		if rawToken == "" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="aabhas"`)
+			writeJSON(w, http.StatusUnauthorized, response{Error: "bearer or api key authentication required"})
+			return
+		}
+
+		ident, err := s.tokens.ValidateToken(rawToken)
+		if err != nil {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="aabhas"`)
+			writeJSON(w, http.StatusUnauthorized, response{Error: err.Error()})
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), identityContextKey{}, ident)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (s *Server) requireRole(role auth.Role, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if len(s.tokens.ListTokens()) == 0 {
+			next(w, r)
+			return
+		}
+
+		ident, ok := r.Context().Value(identityContextKey{}).(*auth.Identity)
+		if !ok || ident == nil {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="aabhas"`)
 			writeJSON(w, http.StatusUnauthorized, response{Error: "bearer authentication required"})
 			return
 		}
-		next.ServeHTTP(w, r)
-	})
+
+		if !ident.HasRole(role) {
+			writeJSON(w, http.StatusForbidden, response{Error: fmt.Sprintf("permission denied: role %s required", role)})
+			return
+		}
+
+		next(w, r)
+	}
+}
+
+func extractBearerOrKey(r *http.Request) string {
+	const prefix = "Bearer "
+	authHeader := r.Header.Get("Authorization")
+	if len(authHeader) > len(prefix) && strings.EqualFold(authHeader[:len(prefix)], prefix) {
+		return strings.TrimSpace(authHeader[len(prefix):])
+	}
+	if key := r.Header.Get("X-Aabhas-Key"); key != "" {
+		return strings.TrimSpace(key)
+	}
+	return ""
 }
 
 // ListenAndServe starts accepting HTTP requests.
@@ -420,4 +523,124 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var req tokenGenerateRequest
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		raw, record, err := s.tokens.GenerateToken(req.Name, req.Role, time.Duration(req.TTLSeconds)*time.Second)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, response{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, tokenResponse{Token: raw, Record: record})
+
+	case http.MethodGet:
+		tokens := s.tokens.ListTokens()
+		sanitized := make([]auth.TokenRecord, len(tokens))
+		for i, t := range tokens {
+			sanitized[i] = t
+			sanitized[i].TokenHash = "[redacted]"
+		}
+		writeJSON(w, http.StatusOK, tokenListResponse{Tokens: sanitized})
+
+	case http.MethodDelete:
+		var req tokenRevokeRequest
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		if err := s.tokens.Revoke(req.TokenID); err != nil {
+			writeJSON(w, http.StatusNotFound, response{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, response{Status: "token revoked"})
+
+	default:
+		w.Header().Set("Allow", "GET, POST, DELETE")
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+	}
+}
+
+func (s *Server) handleLicenseVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+		return
+	}
+	var req licenseVerifyRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	targetUUID := req.TargetHardwareUUID
+	if targetUUID == "" {
+		targetUUID = os.Getenv("AABHAS_HARDWARE_UUID")
+	}
+	if targetUUID == "" {
+		targetUUID = req.License.LicensedHardwareUUID
+	}
+
+	err := license.ValidateLicense(&req.License, targetUUID, nil)
+	resp := licenseVerifyResponse{
+		Valid:          err == nil,
+		CustomerName:   req.License.Payload.CustomerName,
+		Tier:           string(req.License.Payload.Tier),
+		HardwareBound:  req.License.LicensedHardwareUUID,
+		ExpirationDate: req.License.Payload.ExpiresAt.Format(time.RFC3339),
+	}
+	if err != nil {
+		resp.Error = err.Error()
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleModelVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+		return
+	}
+	var req modelVerifyRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.ModelPath) == "" {
+		writeJSON(w, http.StatusBadRequest, response{Error: "model_path is required"})
+		return
+	}
+
+	sha, size, err := orchestrator.ComputeFileSHA256(req.ModelPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, modelVerifyResponse{
+			Valid:     false,
+			ModelPath: req.ModelPath,
+			Error:     err.Error(),
+		})
+		return
+	}
+
+	valid := true
+	if req.ExpectedSHA256 != "" {
+		valid = subtle.ConstantTimeCompare([]byte(sha), []byte(strings.ToLower(req.ExpectedSHA256))) == 1
+	}
+
+	resp := modelVerifyResponse{
+		Valid:          valid,
+		ModelPath:      req.ModelPath,
+		ComputedSHA256: sha,
+		FileSizeBytes:  size,
+	}
+	if !valid {
+		resp.Error = "computed sha256 does not match expected sha256"
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// TokenManager returns the active token manager for programmatic administration.
+func (s *Server) TokenManager() *auth.TokenManager {
+	return s.tokens
 }

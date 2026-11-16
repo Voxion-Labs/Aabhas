@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package cgo_bridge contains the only Go-to-native boundary for the engine.
 package cgo_bridge
 
