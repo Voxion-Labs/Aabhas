@@ -1,6 +1,6 @@
 {
-  "release_tag": "build-49",
-  "tested_commit": "8361f419c432f7a6cb5217d8cc33904f63efe756",
-  "ci_run": 49,
+  "release_tag": "build-50",
+  "tested_commit": "ce2b23bd6afa816413d420aac54ef53be6286e62",
+  "ci_run": 50,
   "generated_by": "github-actions[bot]"
 }
