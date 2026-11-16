@@ -78,6 +78,8 @@ func NewServer(addr string, logger *log.Logger) *Server {
 	protectedMux.HandleFunc("/api/v1/engine/stop", server.handleStop)
 	protectedMux.HandleFunc("/api/v1/engine/status", server.handleStatus)
 	protectedMux.HandleFunc("/api/v1/models", server.handleModels)
+	protectedMux.HandleFunc("/api/v1/hardware/compatibility", server.handleHardwareCompatibility)
+	protectedMux.HandleFunc("/api/v1/benchmark", server.handleBenchmark)
 	protectedMux.HandleFunc("/metrics", server.handleMetrics)
 
 	publicMux := http.NewServeMux()
@@ -307,6 +309,37 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
 	}
+}
+
+func (s *Server) handleHardwareCompatibility(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+		return
+	}
+	prof := orchestrator.DetectHostProfile()
+	eval := orchestrator.HardwareEvaluator{Profile: prof}
+	// Evaluate baseline LLaMA-7B Q4_0
+	est := orchestrator.EstimateModelResources(32000, 4096, 32, 32, 32, 128, 11008, "Q4_0", false)
+	assessment := eval.Evaluate(est, 2048, 1)
+
+	writeJSON(w, http.StatusOK, struct {
+		Hardware   orchestrator.HostHardwareProfile     `json:"hardware"`
+		Assessment orchestrator.CompatibilityAssessment `json:"assessment"`
+	}{
+		Hardware:   prof,
+		Assessment: assessment,
+	})
+}
+
+func (s *Server) handleBenchmark(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, http.StatusMethodNotAllowed, response{Error: "method not allowed"})
+		return
+	}
+	result := orchestrator.RunSyntheticBenchmark()
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {

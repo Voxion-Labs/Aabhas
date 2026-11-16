@@ -34,6 +34,10 @@ func main() {
 		exitCode = runStatus(os.Args[2:])
 	case "health":
 		exitCode = runHealth(os.Args[2:])
+	case "hwcheck":
+		exitCode = runHwCheck(os.Args[2:])
+	case "benchmark":
+		exitCode = runBenchmark(os.Args[2:])
 	case "help", "-h", "--help":
 		usage()
 		return
@@ -108,6 +112,28 @@ func runHealth(args []string) int {
 	return callDaemonMethod(http.MethodGet, *address, "/healthz", nil, *timeout)
 }
 
+func runHwCheck(args []string) int {
+	flags := flag.NewFlagSet("hwcheck", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	address := flags.String("addr", envOr("AABHAS_LISTEN_ADDR", "127.0.0.1:8080"), "daemon address")
+	timeout := flags.Duration("timeout", 10*time.Second, "HTTP request timeout")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	return callDaemonMethod(http.MethodGet, *address, "/api/v1/hardware/compatibility", nil, *timeout)
+}
+
+func runBenchmark(args []string) int {
+	flags := flag.NewFlagSet("benchmark", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	address := flags.String("addr", envOr("AABHAS_LISTEN_ADDR", "127.0.0.1:8080"), "daemon address")
+	timeout := flags.Duration("timeout", 60*time.Second, "HTTP request timeout")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	return callDaemonMethod(http.MethodPost, *address, "/api/v1/benchmark", map[string]any{"type": "full"}, *timeout)
+}
+
 func callDaemon(address, path string, payload any, timeout time.Duration) int {
 	return callDaemonMethod(http.MethodPost, address, path, payload, timeout)
 }
@@ -179,4 +205,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  aabhas-cli stop [-addr HOST:PORT] [-timeout DURATION]")
 	fmt.Fprintln(os.Stderr, "  aabhas-cli status [-addr HOST:PORT] [-timeout DURATION]")
 	fmt.Fprintln(os.Stderr, "  aabhas-cli health [-addr HOST:PORT] [-timeout DURATION]")
+	fmt.Fprintln(os.Stderr, "  aabhas-cli hwcheck [-addr HOST:PORT] [-timeout DURATION]")
+	fmt.Fprintln(os.Stderr, "  aabhas-cli benchmark [-addr HOST:PORT] [-timeout DURATION]")
 }

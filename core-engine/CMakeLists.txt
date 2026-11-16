@@ -19,10 +19,12 @@ add_library(aabhas_data_plane STATIC
     src/inference/gpu_backend.cpp
     src/inference/batch_scheduler.cpp
     src/inference/model_pool.cpp
+    src/inference/benchmark_engine.cpp
     src/scheduler/layer_scheduler.cpp
     src/hardware/nvme_direct.cpp
     src/hardware/nvme_streamer.cpp
     src/hardware/hw_identifier.cpp
+    src/hardware/hw_compatibility.cpp
     src/hardware/gpu_device.cpp
     src/engine/native_engine.cpp
     src/tensor_ops/layer_streamer.cpp
@@ -59,6 +61,8 @@ if (AABHAS_BUILD_TESTS)
     add_executable(aabhas_gpu_backend_test tests/gpu_backend_test.cpp)
     add_executable(aabhas_batch_scheduler_test tests/batch_scheduler_test.cpp)
     add_executable(aabhas_model_pool_test tests/model_pool_test.cpp)
+    add_executable(aabhas_hw_compatibility_test tests/hw_compatibility_test.cpp)
+    add_executable(aabhas_benchmark_test tests/benchmark_test.cpp)
     target_compile_features(aabhas_model_index_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_layer_scheduler_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_inference_runtime_test PRIVATE cxx_std_17)
@@ -71,6 +75,8 @@ if (AABHAS_BUILD_TESTS)
     target_compile_features(aabhas_gpu_backend_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_batch_scheduler_test PRIVATE cxx_std_17)
     target_compile_features(aabhas_model_pool_test PRIVATE cxx_std_17)
+    target_compile_features(aabhas_hw_compatibility_test PRIVATE cxx_std_17)
+    target_compile_features(aabhas_benchmark_test PRIVATE cxx_std_17)
     target_link_libraries(aabhas_model_index_test PRIVATE
         aabhas_data_plane
         Threads::Threads
@@ -119,6 +125,14 @@ if (AABHAS_BUILD_TESTS)
         aabhas_data_plane
         Threads::Threads
     )
+    target_link_libraries(aabhas_hw_compatibility_test PRIVATE
+        aabhas_data_plane
+        Threads::Threads
+    )
+    target_link_libraries(aabhas_benchmark_test PRIVATE
+        aabhas_data_plane
+        Threads::Threads
+    )
     add_test(NAME aabhas_model_index_test COMMAND aabhas_model_index_test)
     add_test(NAME aabhas_layer_scheduler_test COMMAND aabhas_layer_scheduler_test)
     add_test(NAME aabhas_inference_runtime_test COMMAND aabhas_inference_runtime_test)
@@ -131,4 +145,6 @@ if (AABHAS_BUILD_TESTS)
     add_test(NAME aabhas_gpu_backend_test COMMAND aabhas_gpu_backend_test)
     add_test(NAME aabhas_batch_scheduler_test COMMAND aabhas_batch_scheduler_test)
     add_test(NAME aabhas_model_pool_test COMMAND aabhas_model_pool_test)
+    add_test(NAME aabhas_hw_compatibility_test COMMAND aabhas_hw_compatibility_test)
+    add_test(NAME aabhas_benchmark_test COMMAND aabhas_benchmark_test)
 endif()
