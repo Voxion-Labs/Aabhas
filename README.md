@@ -15,277 +15,350 @@
   <img alt="License" src="https://img.shields.io/badge/license-see%20LICENSE-lightgrey">
 </p>
 
-## Overview
+---
 
-Aabhas is a modular inference-engine foundation for models whose tensor layers
-are larger than the available host memory. It separates request orchestration,
-health admission, and native data movement into independently auditable layers.
+## System Overview
 
-The engine is designed around four operational properties:
+Aabhas is an out-of-core inference engine designed for large language models whose aggregate parameter weights exceed physical host RAM or GPU VRAM capacity. Rather than requiring entire model weights to be resident in memory, the engine streams individual tensor layers sequentially from high-throughput NVMe storage into bounded execution arenas, computes forward passes, and evicts pages from the working set.
 
-- bounded resident memory instead of whole-model materialization;
-- sequential storage access for large binary tensor files;
-- a narrow, panic-safe C ABI between the Go control plane and Rust safety grid;
-- explicit container and virtual-machine isolation options for test workloads.
+The system enforces strict architectural boundaries across three programming environments:
 
-This repository contains the control and data-plane foundations. It is not a
-complete model-format implementation or a replacement for production identity,
-authorization, monitoring, or Kubernetes policy controls.
-
-## Architecture
-
-```text
-                         +---------------------------+
-                         | CLI / authenticated proxy |
-                         +-------------+-------------+
-                                       |
-                                       v
-                         +---------------------------+
-                         | Go Control-Plane          |
-                         | REST + lifecycle gate     |
-                         +-------------+-------------+
-                                       |
-                                       v
-                         +---------------------------+
-                         | Rust Safety Grid          |
-                         | RAM / SSD / FFI boundary  |
-                         +-------------+-------------+
-                                       |
-                                       v
- +------------------+       +---------------------------+
- | NVMe SSD models  | ----> | C++17 Data-Plane          |
- | .bin tensor data |       | fd + mmap + layer windows |
- +------------------+       +-------------+-------------+
-                                       |
-                                       v
-                         +---------------------------+
-                         | Tensor consumer            |
-                         | bounded resident pages     |
-                         +---------------------------+
+```
+[ Go Control Plane ]       --- HTTP / REST, CLI, RBAC Auth, Continuous Batching, Model Pool
+         |||
+[ Rust Safety Grid ]       --- Panic-Safe C ABI, Hardware UUID License Gate, RAM & NVMe Preflight
+         |||
+[ C++17 Data Plane ]       --- POSIX fd / O_DIRECT, mmap Illusion, Quantized SIMD, Layer Streamer
 ```
 
-### Data plane
+---
 
-The C++17 data plane uses POSIX file descriptors, optional Linux `O_DIRECT`,
-`mmap`, and `madvise`. `LayerStreamer` maps one bounded layer chunk at a time,
-marks sequential access, and applies `MADV_DONTNEED` before dropping a previous
-mapping. The kernel controls actual page residency; the hints do not promise an
-instantaneous physical-memory reclaim.
+## Architecture and Subsystem Isolation
 
-The transformer execution boundary resolves GGUF or SafeTensors block tensor
-names, streams those float32 or quantized tensors through the scheduler into one
-bounded arena, and executes a complete pre-norm decoder block. Grouped-query
-attention, RoPE, residual paths, gated feed-forward layers, and a bounded KV
-cache share the same allocation-free kernel set for multi-token prefill and
-single-token decode.
+The execution pipeline partitions failure domains and memory ownership across isolated boundaries:
 
-Quantized CPU kernels execute directly on GGML block formats (`Q4_0`, `Q4_1`,
-`Q5_0`, `Q5_1`, `Q8_0`, `Q8_1`) and half-precision floats (`F16`, `BF16`),
-providing bounded scalar conversion, direct dot-product accumulation, and
-streaming dequantization across arbitrary scheduler chunk windows.
+```text
+ +-----------------------------------------------------------------------------------+
+ |                                 Client / Proxy                                    |
+ +------------------------------------------+----------------------------------------+
+                                            |
+                                  Bearer Token / RBAC
+                                            v
+ +-----------------------------------------------------------------------------------+
+ |                                Go Control Plane                                   |
+ |  - REST API & Token Manager (CSPRNG, SHA-256 verification, Role-Based Access)    |
+ |  - In-flight Continuous Batch Scheduler & Dynamic Request Queue                   |
+ |  - Multi-Model Pool (LRU Eviction, Memory Tracking, Concurrent Leases)            |
+ |  - Hardware Compatibility Evaluator & Benchmark Expositions                       |
+ |  - Prometheus Metrics Exporter & Structured Health Probes (/healthz, /readyz)     |
+ +------------------------------------------+----------------------------------------+
+                                            |
+                                     Cgo / C ABI Call
+                                            v
+ +-----------------------------------------------------------------------------------+
+ |                                Rust Safety Grid                                   |
+ |  - Panic Boundary (catch_unwind across FFI, deterministic integer status codes)  |
+ |  - Physical Host RAM Guard (Rejects admission when host usage >= 70%)             |
+ |  - NVMe Storage Reserve Probe (Mandates >= 20 GiB available storage blocks)       |
+ |  - Node Identity Gate (Hardware UUID normalization & Ed25519 signature checks)   |
+ +------------------------------------------+----------------------------------------+
+                                            |
+                                      Native Entry
+                                            v
+ +-----------------------------------------------------------------------------------+
+ |                                C++17 Data Plane                                   |
+ |  - Storage Layer: NvmeDirectReader (POSIX O_DIRECT) & MemoryIllusionist (mmap)    |
+ |  - Streaming Engine: LayerStreamer with MADV_SEQUENTIAL and MADV_DONTNEED hints   |
+ |  - Quantized Kernels: SIMD Dot Products for FP16, Q4_0, Q4_1, Q8_0 Block Formats  |
+ |  - Transformer Execution: RoPE, RMSNorm, SwiGLU, Grouped-Query Attention (GQA)    |
+ |  - Generation Loop: Bounded KV Cache, Autoregressive Decode, Dynamic Stop Tokens  |
+ |  - Sampling: Temperature, Top-K, Top-P, Min-P, Repetition Penalties, Streaming   |
+ |  - Acceleration: Multi-Backend VRAM Allocator (CUDA / ROCm / Vulkan abstraction)  |
+ |  - Model Integrity: Streaming FIPS 180-4 SHA-256 Verifier for GGUF & SafeTensors |
+ +-----------------------------------------------------------------------------------+
+```
 
-The autoregressive token generation engine builds on top of this layer and
-bounded KV-cache foundation. It executes multi-token prompt prefill and
-single-token decode loops with zero heap allocation per iteration, managing
-sequence tracking, layer forwarding, final RMSNorm, LM head logit projection,
-and greedy token selection with early EOS stopping.
+### Subsystem Boundaries
 
-### Safety grid
+| Subsystem | Primary Responsibilities | Failure Boundary | Invariant Guarantees |
+| :--- | :--- | :--- | :--- |
+| **Go Control Plane** | HTTP routing, request decoding, RBAC validation, batch scheduling, model lifecycle. | Process crash / HTTP 5xx | Never copies or buffers raw tensor weights in Go runtime heaps. |
+| **Rust Safety Grid** | Preflight RAM capacity checks, storage quotas, hardware licensing, FFI ABI isolation. | Deterministic negative error codes | Catches panics; never allows unhandled Rust unwinding to cross C ABI. |
+| **C++17 Data Plane** | Storage I/O, page mapping, SIMD quantization kernels, transformer attention, KV cache. | Standard OS signals / error states | Pre-allocates working arenas; executes decode loops with zero heap allocations. |
 
-The Rust `cdylib` exposes only `start_aabhas_engine` and
-`stop_aabhas_engine`. FFI entry points catch panics and return stable integer
-status codes. Admission checks reject starts when host memory reaches the 70%
-threshold or the model filesystem has less than 20 GiB available.
+---
 
-### Control plane
+## Technical Phase Specifications
 
-The Go daemon uses the standard `net/http` library. Its native bridge copies
-model paths into C-owned memory for the duration of each call and serializes
-native calls. The orchestrator package provides a thread-safe layer queue and a
-single-model execution lease for higher-level scheduling.
+All core functional components are specified and verified across 10 architectural phases. Detailed specifications and implementation documentation are linked below:
 
-## Repository layout
+| Phase | Subsystem | Implementation Scope | Documentation Blob Link |
+| :---: | :--- | :--- | :--- |
+| **01** | Model Loaders | SafeTensors & GGUF metadata parsing, tensor offset mapping, zero-copy indexing. | [`docs/product-phase-1-model-formats.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-1-model-formats.md) |
+| **02** | Tokenizer | Byte-Pair Encoding (BPE), SentencePiece, UTF-8 normalization, special token tables. | [`docs/product-phase-2-tokenizer.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-2-tokenizer.md) |
+| **03** | Transformer Layers | Grouped-Query Attention (GQA), RoPE positional embeddings, SwiGLU MLP, RMSNorm. | [`docs/product-phase-3-transformer-layers.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-3-transformer-layers.md) |
+| **04** | Quantized Compute | Vectorized SIMD dot-product kernels for `FP16`, `Q4_0`, `Q4_1`, and `Q8_0` block formats. | [`docs/product-phase-4-quantized-kernels.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-4-quantized-kernels.md) |
+| **05** | KV Cache & Generation | Pre-allocated circular KV buffers, autoregressive prompt prefill and token decode loops. | [`docs/product-phase-5-kv-cache-token-generation.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-5-kv-cache-token-generation.md) |
+| **06** | Sampling & Streaming | Temperature, Top-K, Top-P, Min-P, repetition penalty, dynamic stop sequences, token callbacks. | [`docs/product-phase-6-sampling-streaming.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-6-sampling-streaming.md) |
+| **07** | Acceleration & VRAM | Hardware backend abstraction (CUDA / ROCm / Vulkan), unified memory, hybrid CPU offload. | [`docs/product-phase-7-gpu-vram-backend.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-7-gpu-vram-backend.md) |
+| **08** | Multi-Model & Batching | In-flight continuous sequence batching, multi-model LRU memory pool, execution leases. | [`docs/product-phase-8-multi-model-batching.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-8-multi-model-batching.md) |
+| **09** | Hardware & Benchmarks | Execution tier classifier (`FullGpu`, `HybridGpuOffload`, `CpuRam`, `NvmeOutofCore`), microbenchmarks. | [`docs/product-phase-9-benchmarking-hardware.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-9-benchmarking-hardware.md) |
+| **10** | Identity & Provenance | CSPRNG RBAC tokens, Ed25519 hardware node licensing, FIPS 180-4 SHA-256 tensor verification. | [`docs/product-phase-10-production-identity.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-10-production-identity.md) |
+
+---
+
+## Core Execution Mechanics
+
+### 1. Zero-Allocation Autoregressive Step
+During generation, `TokenGenerator` operates over pre-allocated workspace arenas. Context structures, layer activations, projection vectors, and KV caches are pinned upfront. The inner decode loop executes matrix-vector operations, layer normalization, residual accumulation, and logit sampling without invoking heap memory managers (`malloc`/`new`).
+
+### 2. Virtual Memory Illusion & Layer Streaming
+To run models exceeding RAM size, `MemoryIllusionist` maps individual layer offsets from storage using `mmap`. `LayerStreamer` instructs the Linux kernel on access patterns:
+* Forward prefetch: issues `madvise(MADV_SEQUENTIAL)` and `POSIX_FADV_WILLNEED` on adjacent layer windows.
+* Working set release: invokes `madvise(MADV_DONTNEED)` immediately after completing forward compute on a layer, allowing kernel page reclaim before the next layer is mapped.
+
+### 3. Quantized SIMD Kernels
+Inference execution supports unquantized Float32 as well as packed block formats:
+* `Q4_0`: 32 4-bit signed nibbles sharing a single 16-bit float scale factor.
+* `Q4_1`: 32 4-bit unsigned nibbles with a 16-bit float scale and 16-bit float minimum offset.
+* `Q8_0`: 32 8-bit signed integer values with a 16-bit float scale.
+* `FP16` / `BF16`: Half-precision IEEE 754 floating-point conversion and dot products.
+
+Kernels compute dot products directly across quantized blocks with AVX2/AVX-512 FMA vectorization where supported, minimizing intermediate conversions.
+
+### 4. Continuous In-Flight Batching
+The batch scheduler manages multiple concurrent generation requests concurrently. Requests dynamically transition through `WAITING`, `PREFILLING`, `GENERATING`, `COMPLETED`, or `STOPPED`. Prefill tokens and single-step decode operations are scheduled in unified forward batches, maximizing memory bandwidth saturation across active sequences.
+
+### 5. Multi-Model Pool
+Multiple models can be registered and hosted simultaneously via `ModelPool`. Model instances are managed under an LRU eviction policy governed by configurable memory thresholds. Weights and static configurations are shared across active inference sessions.
+
+---
+
+## Hardware Compatibility and Execution Tiers
+
+The engine inspects available hardware topology (CPU cores, vector extensions, host RAM, GPU devices, dedicated VRAM, and NVMe read throughput) to assign models to deterministic execution tiers:
+
+```
++-------------------------------------------------------------------------------------+
+|                               Hardware Assessment                                   |
++---------------------+-------------------+---------------------+---------------------+
+|      FullGpu        | HybridGpuOffload  |       CpuRam        |   NvmeOutofCore     |
++---------------------+-------------------+---------------------+---------------------+
+| Model weights, KV   | Active layers or  | Model resident in   | Model exceeds RAM;  |
+| cache & activations | KV cache in VRAM; | host RAM; SIMD      | streamed layer by   |
+| fit entirely inside | remaining weights | quantized execution | layer from NVMe     |
+| discrete GPU VRAM.  | in host RAM/NVMe. | on host CPU cores.  | via virtual memory. |
++---------------------+-------------------+---------------------+---------------------+
+```
+
+Topology evaluation is exposed via CLI (`aabhas-cli hwcheck`) and REST endpoint (`POST /api/v1/hardware/compatibility`).
+
+---
+
+## Security, Licensing, and Model Provenance
+
+### Role-Based Access Control (RBAC)
+Control plane requests are authenticated via Bearer tokens generated from a cryptographically secure pseudorandom number generator (CSPRNG). Tokens are stored as SHA-256 digests and verified using constant-time string comparisons.
+
+Four hierarchical roles enforce principle of least privilege:
+* `admin`: Complete cluster access, token management, engine lifecycle start/stop.
+* `operator`: Model registration, hardware verification, benchmarking, license evaluation.
+* `inference`: Model listing, token generation, streaming inference pipelines.
+* `auditor`: Status queries, non-sensitive readiness probes, Prometheus metrics scraping.
+
+### Hardware-Bound Licensing
+Enterprise deployments can enforce hardware-locked execution nodes. Aabhas normalizes system board, chassis, and CPU serial signatures into a deterministic hardware UUID. Licenses are signed with standard Ed25519 asymmetric cryptography and verified across the Rust safety grid prior to engine startup.
+
+### Cryptographic Model Integrity
+To prevent model supply-chain tampering or storage bitrot, the engine includes a streaming FIPS 180-4 SHA-256 verifier. It calculates deterministic digests across raw tensor files and verifies canonical model manifests (`ModelManifest`) without buffering entire models in memory.
+
+---
+
+## Repository Layout
 
 ```text
 core-engine/                  C++17 data plane and Rust safety grid
+  ├── include/                Data plane headers (models, tensors, scheduler, kernels)
+  ├── src/                    C++ engine implementation and streaming layers
+  ├── rust_trap/              Rust cdylib (panic handling, memory and storage gates)
+  └── tests/                  15 CTest unit and integration suites
 control-plane/                Go daemon, CLI, API, and orchestration
-ffi-bridge/                   C ABI header and protobuf schema
-stealth-deploy/               Container and Kubernetes deployment assets
-sandbox/                      Isolated development and VM tooling
-tests/                        End-to-end and Valgrind audit scripts
-docs/                         API and architecture documentation
-scripts/                      Setup and release automation
+  ├── cmd/aabhas-cli/         CLI interface (lifecycle, hardware check, licensing, verify)
+  ├── cmd/aabhas-daemon/      HTTP daemon with RBAC and continuous batching
+  └── internal/               API handlers, orchestrator, model pool, auth, license
+ffi-bridge/                   C ABI header definitions and FFI bindings
+stealth-deploy/               Production Dockerfile and Kubernetes deployment manifests
+sandbox/                      Isolated dev environments and VM setup tooling
+tests/                        Valgrind memory leak checks and end-to-end audit scripts
+docs/                         Architecture specifications and Phase 1-10 documentation
+scripts/                      Release automation, build validation, and dev setup
 ```
 
-## Build prerequisites
+---
 
-Ubuntu/Debian development hosts require:
+## Build Prerequisites
 
-- GCC/G++, CMake, and POSIX development headers;
-- Rust and Cargo;
-- Go 1.22 or newer;
-- Bash, `curl`, `valgrind`, and standard archive utilities;
-- Docker for the isolated release pipeline.
+Building Aabhas from source requires:
+* **C++ Compiler:** GCC 11+ or Clang 14+ supporting C++17.
+* **Build System:** CMake 3.16+ and GNU Make.
+* **Rust:** Rust 1.75+ (Cargo) with `cdylib` target.
+* **Go:** Go 1.22+ for the control plane.
+* **Platform:** Linux (x86_64 or aarch64) with POSIX compliance.
 
-The repository setup script installs the compiler and audit prerequisites:
-
-```bash
-sudo ./scripts/dev_setup.sh
-```
-
-Review the script before running it on a managed host. It installs packages
-through the configured Ubuntu/Debian package manager and Rust through the
-official `rustup` installer.
-
-## Build
+To build all tiers locally:
 
 ```bash
+# 1. Compile C++ data plane and Rust safety grid
 make build-core
+
+# 2. Compile Go daemon and CLI
 make build-go
 ```
 
-The Rust build produces `core-engine/rust_trap/target/{debug,release}/libaabhas.so`.
-The Go build places `aabhas-cli` and `aabhas-daemon` in `bin/`.
-
-For a deterministic stripped release archive:
+To build a deterministic, stripped production release archive:
 
 ```bash
-AABHAS_RELEASE_VERSION=local-test ./scripts/build_release.sh
+AABHAS_RELEASE_VERSION=v1.0.0 ./scripts/build_release.sh
 ```
 
-The archive contains both `aabhas-daemon` and `aabhas-cli`, the native
-`libaabhas.so`, the license, and a SHA-256 sidecar.
+---
 
-## Run the daemon
+## Operation and Control Surface
 
-The daemon defaults to `127.0.0.1:8080`:
+### Command Line Interface (`aabhas-cli`)
 
-```bash
-./bin/aabhas-daemon
-```
-
-Set an explicit address when running behind a trusted service boundary:
+The bundled CLI provides complete administrative control over local and remote daemon instances:
 
 ```bash
-AABHAS_LISTEN_ADDR=127.0.0.1:8080 ./bin/aabhas-daemon
-```
+# Evaluate local hardware compatibility against a model
+./bin/aabhas-cli hwcheck -model /models/llama-3-8b.gguf -ctx 4096 -batch 4
 
-The HTTP API is documented in [`docs/api_reference.md`](docs/api_reference.md).
+# Run microbenchmarks on quantized compute kernels and decode runtime
+./bin/aabhas-cli benchmark -type kernels -dim 4096 -iters 200
 
-## Control commands
+# Generate an Ed25519 keypair for enterprise licensing
+./bin/aabhas-cli keygen -out license_keys.json
 
-Start a model:
+# Generate and verify a node-locked hardware license
+./bin/aabhas-cli license generate -key private.pem -uuid 550e8400-e29b-41d4-a716-446655440000 -tier enterprise
+./bin/aabhas-cli license verify -key public.pem -license node.lic
 
-```bash
-./bin/aabhas-cli start \
-  -addr 127.0.0.1:8080 \
-  -model /models/example/model.bin
-```
+# Verify cryptographic SHA-256 manifest and tensor integrity
+./bin/aabhas-cli verify-model -model /models/llama-3-8b.gguf
 
-Stop the active model:
+# Start an engine lifecycle lease
+./bin/aabhas-cli start -addr 127.0.0.1:8080 -model /models/llama-3-8b.gguf
 
-```bash
+# Query status and inspect active models
+./bin/aabhas-cli status -addr 127.0.0.1:8080
+
+# Gracefully terminate active execution
 ./bin/aabhas-cli stop -addr 127.0.0.1:8080
 ```
 
-Equivalent HTTP requests:
+### Control Plane REST Endpoints
+
+The Go daemon listens by default on `127.0.0.1:8080`. When authentication is enabled, requests require `Authorization: Bearer <token>`.
+
+| Route | Method | Required Role | Description |
+| :--- | :---: | :---: | :--- |
+| `/api/v1/engine/start` | `POST` | `admin` | Commences native engine execution lease for a model path. |
+| `/api/v1/engine/stop` | `POST` | `admin` | Evicts active execution and releases data plane memory mappings. |
+| `/api/v1/engine/status` | `GET` | `auditor` | Returns engine lifecycle counters, lease state, and uptime. |
+| `/api/v1/models` | `POST` | `inference` | Registers and validates model file descriptors in registry. |
+| `/api/v1/models` | `GET` | `inference` | Lists registered model metadata and supported tensor types. |
+| `/api/v1/hardware/compatibility` | `POST` | `operator` | Evaluates topology and predicts required execution tier. |
+| `/api/v1/benchmark` | `POST` | `operator` | Executes synchronous compute and memory throughput tests. |
+| `/api/v1/auth/tokens` | `POST` | `admin` | Provisions, rotates, or revokes scoped RBAC tokens. |
+| `/api/v1/license/verify` | `POST` | `operator` | Verifies node hardware UUID against cryptographic license. |
+| `/api/v1/models/verify` | `POST` | `operator` | Verifies FIPS 180-4 SHA-256 tensor hash manifest integrity. |
+| `/metrics` | `GET` | `auditor` | Exposes Prometheus format counters, latencies, and gauges. |
+| `/healthz` | `GET` | *Public* | Liveness probe indicating daemon HTTP process is alive. |
+| `/readyz` | `GET` | *Public* | Readiness probe indicating daemon is initialized and accepting requests. |
+
+---
+
+## Test Suites and Quality Verification
+
+The repository enforces deterministic quality checks across the entire stack:
 
 ```bash
-curl --fail-with-body --silent --show-error \
-  -X POST http://127.0.0.1:8080/api/v1/engine/start \
-  -H 'Content-Type: application/json' \
-  --data '{"model_path":"/models/example/model.bin"}'
-
-curl --fail-with-body --silent --show-error \
-  -X POST http://127.0.0.1:8080/api/v1/engine/stop
-```
-
-## Tests and audits
-
-Run the repository quality gates after the required toolchains are available:
-
-```bash
+# Execute native CTest suite, Rust safety tests, and Go race test suite
 make test
 ```
 
-This runs the native CTest suite, Rust tests, race-enabled Go tests and vet,
-plus shell syntax checks. The CI workflow runs the same categories on every
-push and pull request.
+### Verification Matrix
 
-End-to-end lifecycle test:
+* **15 C++ CTests:**
+  1. `aabhas_model_index_test`: GGUF & SafeTensors metadata, tensor headers, corrupt input rejection.
+  2. `aabhas_layer_scheduler_test`: Sequential window advancement, prefetch hints, rewind verification.
+  3. `aabhas_inference_runtime_test`: Streaming matrix-vector dot products, layer memory arenas.
+  4. `aabhas_tokenizer_test`: BPE / SentencePiece tokens, byte fallbacks, special token handling.
+  5. `aabhas_transformer_layers_test`: RoPE rotation, RMSNorm, SwiGLU MLP, multi-head attention.
+  6. `aabhas_transformer_block_test`: Complete pre-norm transformer decoder block forward pass.
+  7. `aabhas_quantized_kernels_test`: Mathematical accuracy across `FP16`, `Q4_0`, `Q4_1`, and `Q8_0`.
+  8. `aabhas_token_generator_test`: Prefill and autoregressive token generation with KV cache.
+  9. `aabhas_sampling_test`: Deterministic greedy, top-K, top-P, temperature, and penalty transforms.
+  10. `aabhas_gpu_backend_test`: GPU buffer allocation, device memory tracking, and fallback tiers.
+  11. `aabhas_batch_scheduler_test`: Concurrent multi-sequence in-flight batching and early stops.
+  12. `aabhas_model_pool_test`: LRU model caching, concurrent model leases, working set eviction.
+  13. `aabhas_hw_compatibility_test`: Automated topology scoring and memory calculation accuracy.
+  14. `aabhas_benchmark_test`: Microbenchmark measurement loops, throughput and latency metrics.
+  15. `aabhas_model_integrity_test`: FIPS 180-4 SHA-256 test vectors, tamper detection, manifest hashing.
+* **Rust Unit Tests:** Memory percentage thresholds (>=70% rejection), filesystem block capacity (>=20 GiB reserve), and Ed25519 signature validation.
+* **Go Race-Free Tests:** Multi-threaded REST route validation, token manager synchronization, continuous batch scheduler queues, and memory pool eviction.
+* **Security & Memory Leak Audits:** Valgrind dynamic memory leak check (`./tests/security_audits/run_valgrind.sh`) runs zero-leak verification across C++ layer streamer.
 
-```bash
-make build-go
-AABHAS_DAEMON_BIN="$PWD/bin/aabhas-daemon" ./tests/e2e_tests/run_tests.sh
-```
+---
 
-Native leak audit:
+## Production Deployment and Hardening
 
-```bash
-./tests/security_audits/run_valgrind.sh
-```
+The production container configuration enforces defense-in-depth isolation:
 
-Unauthorized-hardware protection test:
+* **Non-Root Execution:** Runs under dedicated unprivileged UID/GID `65532:65532`.
+* **Read-Only Root Filesystem:** Root filesystems are mounted read-only; mutable state is restricted to ephemeral `tmpfs` mounts.
+* **Minimal Linux Capabilities:** Drops all capabilities by default, retaining only `CAP_IPC_LOCK` when page pinning is enabled.
+* **Storage Access:** Model repositories are mounted read-only via high-speed NVMe block storage.
+* **Kubernetes Orchestration:** Production manifests (`stealth-deploy/kubernetes/`) provide standard DaemonSets/Deployments with native `/healthz` and `/readyz` probes.
 
-```bash
-AABHAS_DAEMON_BIN="$PWD/bin/aabhas-daemon" ./scripts/trigger_poison_test.sh
-```
-
-The audit script compiles a temporary native layer-streaming harness and
-removes all generated test files on exit. The poison-protection test uses a
-temporary buffer and mock UUID values; it never scrambles model files or host
-memory.
-
-## Container and VM isolation
-
-Build the production image:
-
-```bash
-docker build -f stealth-deploy/Dockerfile.prod -t aabhas:local .
-```
-
-The production image runs as a non-root UID, uses a read-only root filesystem
-in Compose/Kubernetes configurations, and drops capabilities except the
-explicitly requested `IPC_LOCK` capability. Host SSD paths should be mounted
-read-only for model consumption.
-
-Container health is exposed through `/healthz` and `/readyz`; the production
-image and Compose configuration use the bundled `aabhas-cli health` probe.
-Kubernetes deployments require the `aabhas-api-auth` Secret with a `token` key
-for control-plane authentication.
-
-For a non-root diagnostic environment:
+To build the production container image:
 
 ```bash
-docker build -f sandbox/docker-test-env/Dockerfile.dev -t aabhas-dev .
-docker run --rm -it --mount type=bind,src="$PWD",dst=/workspace aabhas-dev
+docker build -f stealth-deploy/Dockerfile.prod -t aabhas:latest .
 ```
 
-The VM helper creates a disposable QEMU/KVM guest with no default network and
-no host-directory sharing. Review host virtualization policy before running it:
+---
 
-```bash
-sudo ./sandbox/vm-scripts/setup_vm.sh
-```
+## Documentation Index
 
-## Operational limits
+Comprehensive engineering specifications are maintained in the [`docs/`](https://github.com/Voxion-Labs/Aabhas/tree/main/docs) directory:
 
-- The control plane supports one active model per daemon process.
-- RAM and storage checks are admission controls, not substitutes for cgroups,
-  quotas, or node-level monitoring.
-- The REST API has no authentication by itself. Keep it on loopback or place
-  it behind an authenticated, mutually trusted proxy.
-- Kubernetes `hostPath` volumes require operator review and pre-provisioned
-  directories on eligible nodes.
+* [`docs/architecture.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/architecture.md) — Comprehensive technical architecture specification.
+* [`docs/api_reference.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/api_reference.md) — HTTP REST control plane reference.
+* [`docs/product-phase-1-model-formats.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-1-model-formats.md) — Phase 1: Model Format Loaders & Indexing.
+* [`docs/product-phase-2-tokenizer.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-2-tokenizer.md) — Phase 2: Tokenization Engine.
+* [`docs/product-phase-3-transformer-layers.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-3-transformer-layers.md) — Phase 3: Transformer Layers & Attention.
+* [`docs/product-phase-4-quantized-kernels.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-4-quantized-kernels.md) — Phase 4: Quantized CPU SIMD Kernels.
+* [`docs/product-phase-5-kv-cache-token-generation.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-5-kv-cache-token-generation.md) — Phase 5: KV Cache & Autoregressive Decoding.
+* [`docs/product-phase-6-sampling-streaming.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-6-sampling-streaming.md) — Phase 6: Sampling Strategies & Streaming.
+* [`docs/product-phase-7-gpu-vram-backend.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-7-gpu-vram-backend.md) — Phase 7: GPU Acceleration & VRAM Allocator.
+* [`docs/product-phase-8-multi-model-batching.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-8-multi-model-batching.md) — Phase 8: Multi-Model Pool & Continuous Batching.
+* [`docs/product-phase-9-benchmarking-hardware.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-9-benchmarking-hardware.md) — Phase 9: Hardware Compatibility & Benchmarking.
+* [`docs/product-phase-10-production-identity.md`](https://github.com/Voxion-Labs/Aabhas/blob/main/docs/product-phase-10-production-identity.md) — Phase 10: Production Identity & Model Provenance.
 
-## Security and repository policy
-
-The release workflow is the only workflow granted `contents: write`, and its
-job uses the GitHub Actions bot identity after successful main-branch CI. The
-repository owner must still configure GitHub branch rulesets, required
-Code Owner approval, push restrictions, and fork policy in repository settings.
-Those account-level controls cannot be enforced by source files alone.
+---
 
 ## License
 
-See [`LICENSE`](LICENSE) for the repository license and distribution terms.
+See [`LICENSE`](https://github.com/Voxion-Labs/Aabhas/blob/main/LICENSE) for distribution terms.
+
+<br>
+<div align="right">
+  <b>Rudranarayan Jena</b><br>
+  <i>Founder @ Voxion Labs</i>
+</div>
+
+---
+<div align="center">
+  (c) 2026 Voxion Labs & Rudranarayan Jena
+</div>
